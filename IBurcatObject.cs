@@ -80,6 +80,7 @@ namespace BurcatProtocol
             BurcatCache.AddToCache(GetType());
             return BurcatCache.SetField(GetType(), this, field) is null;
         }
-        public abstract IBurcatObject?[] GetBurcatConstructionValues();
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate(GetBurcatConstructionValues());
+        public abstract object?[] GetBurcatConstructionValues();
     }
 }

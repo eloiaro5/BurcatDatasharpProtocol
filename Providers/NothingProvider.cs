@@ -14,6 +14,6 @@ namespace BurcatProtocol.Providers
         public override BurcatException? UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field) => new($"A {nameof(NothingProvider)} is not able to maintain objects.");
         public override BurcatException? DestroyObject(Guid? streamID, Type objectType, Guid objectID) => new($"A {nameof(NothingProvider)} is not able to maintain objects.");
 
-        public override ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, IBurcatObject?[] parameters) => ActionResult.Unsuccessful;
+        public override ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters) => ActionResult.Unsuccessful;
     }
 }

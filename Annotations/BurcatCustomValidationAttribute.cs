@@ -37,10 +37,18 @@ namespace BurcatProtocol.Annotations
 
         public override bool IsValid(object? value)
         {
-            ValidationResult? result = (ValidationResult?)Delegate.DynamicInvoke(Transformable.DynamicCast(value, ObjectInfo));
-            return result is null || result == ValidationResult.Success;
+            if (Transformable.TryDynamicCast(value, ObjectInfo, out object? pValue))
+            {
+                ValidationResult? result = (ValidationResult?)Delegate.DynamicInvoke(pValue);
+                return result is null || result == ValidationResult.Success;
+            }
+            else return false;
         }
 
-        protected override ValidationResult? IsValid(object? value, ValidationContext validationContext) => (ValidationResult?)Delegate.DynamicInvoke(Transformable.DynamicCast(value, ObjectInfo));
+        protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+        {
+            if (Transformable.TryDynamicCast(value, ObjectInfo, out object? result)) return (ValidationResult?)Delegate.DynamicInvoke(result);
+            else return new("The specified object is not of the expected validation type.");
+        }
     }
 }

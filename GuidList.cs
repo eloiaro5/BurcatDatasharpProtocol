@@ -38,10 +38,12 @@
             else yield return type.GUID;
         }
 
+        public static GuidList Empty { get; } = new();
+
         private readonly Guid[] guids;
         private readonly int hashCode;
 
-        public GuidList() { guids = []; }
+        private GuidList() { guids = []; hashCode = 0; }
 
         public GuidList(Guid guid) : this([guid]) { }
         public GuidList(Guid[] guids) { this.guids = guids; hashCode = ComputeHashCode(guids); }

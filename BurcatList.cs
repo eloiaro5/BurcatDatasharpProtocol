@@ -1,4 +1,4 @@
-﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Annotations;
 using BurcatProtocol.Collections;
 using System;
 using System.Collections;
@@ -130,7 +130,7 @@ namespace BurcatProtocol
         public override BurcatField[] GetBurcatFields()
         {
             BurcatField[] fields = new BurcatField[Count];
-            for (int i = 0; i < Count; i++) fields[i] = new($"{i}", values[i] is object obj ? BurcatTranslator.Translate(obj) : null);
+            for (int i = 0; i < Count; i++) fields[i] = new($"{i}", BurcatTranslator.ObjectTranslate(values[i]));
 
             return fields;
 
@@ -140,7 +140,8 @@ namespace BurcatProtocol
             if (int.TryParse(field.Name, out int index))
             {
                 if (field.Value is null) values[index] = default!;
-                else if (field.Value is BurcatTranslation translation) values[index] = BurcatTranslator.Translate<T>(translation);
+                else if (GetType().GetGenericArguments()[0].IsAssignableFrom(field.Value.GetType())) values[index] = (T)field.Value;
+                else if (field.Value is BurcatTranslation translation && BurcatTranslator.TryTranslate<T>(translation, out T? value)) values[index] = value;
                 else throw new InvalidCastException();
 
                 if (Count <= index) Count = index + 1;
@@ -149,7 +150,7 @@ namespace BurcatProtocol
 
             return true;
         }
-        public override IBurcatObject?[] GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(T)), Identifier, Count]);
+        public override object?[] GetBurcatConstructionValues() => [new BurcatType(typeof(T)), Identifier, Count];
 
         public static implicit operator BurcatList<T>(T[] array) => new([.. array]);
         public static implicit operator T[](BurcatList<T> list) { Array.Resize(ref list.values, list.Count); return list.values; }

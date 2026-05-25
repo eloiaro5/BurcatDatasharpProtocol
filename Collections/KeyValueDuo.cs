@@ -21,7 +21,7 @@ namespace BurcatProtocol.Collections
         IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues()
         {
             BurcatType keyType = new(BurcatChat.GetClassIdentity<TK>(), false), valueType = new(BurcatChat.GetClassIdentity<TV>());
-            return BurcatTranslator.FullObjectsTranslate([keyType, valueType, Key, Value]);
+            return BurcatTranslator.ObjectsTranslate([keyType, valueType, Key, Value]);
         }
 
         public static implicit operator KeyValueDuo<TK, TV>(KeyValuePair<TK, TV> pair) => new(pair.Key, pair.Value);

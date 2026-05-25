@@ -1,4 +1,4 @@
-﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Annotations;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -30,7 +30,7 @@ namespace BurcatProtocol.Collections
         public void Add(I item) => AddAsync(item).GetAwaiter().GetResult();
         public async Task AddAsync(I item, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Add), BurcatTranslator.FullObjectsTranslate([item]), token: token)).SuccessfulExecution) list.Add(item);
+            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Add), BurcatTranslator.ObjectsTranslate([item]), token: token)).SuccessfulExecution) list.Add(item);
             else throw new SynchronizationException();
         }
 
@@ -44,21 +44,21 @@ namespace BurcatProtocol.Collections
         public void Insert(int index, I item) => InsertAsync(index, item).GetAwaiter().GetResult();
         public async Task InsertAsync(int index, I item, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Insert), BurcatTranslator.FullObjectsTranslate([index, item]), token: token)).SuccessfulExecution) list.Insert(index, item);
+            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Insert), BurcatTranslator.ObjectsTranslate([index, item]), token: token)).SuccessfulExecution) list.Insert(index, item);
             else throw new SynchronizationException();
         }
 
         public bool Remove(I item) => RemoveAsync(item).GetAwaiter().GetResult();
         public async Task<bool> RemoveAsync(I item, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Remove), BurcatTranslator.FullObjectsTranslate([item]), token: token)).SuccessfulExecution) return list.Remove(item);
+            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.Remove), BurcatTranslator.ObjectsTranslate([item]), token: token)).SuccessfulExecution) return list.Remove(item);
             else throw new SynchronizationException();
         }
 
         public void RemoveAt(int index) => RemoveAtAsync(index).GetAwaiter().GetResult();
         public async Task RemoveAtAsync(int index, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.RemoveAt), BurcatTranslator.FullObjectsTranslate([index]), token: token)).SuccessfulExecution) list.RemoveAt(index);
+            if ((await BurcatChat.RelayActionAsync(new(list), nameof(list.RemoveAt), BurcatTranslator.ObjectsTranslate([index]), token: token)).SuccessfulExecution) list.RemoveAt(index);
             else throw new SynchronizationException();
         }
 
@@ -69,6 +69,6 @@ namespace BurcatProtocol.Collections
 
         IEnumerator IEnumerable.GetEnumerator() => list.GetEnumerator();
 
-        public override IBurcatObject?[] GetBurcatConstructionValues() => [new BurcatType(typeof(L)), list];
+        public override object?[] GetBurcatConstructionValues() => [new BurcatType(typeof(L)), list];
     }
 }

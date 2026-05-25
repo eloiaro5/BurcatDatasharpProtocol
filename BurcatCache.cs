@@ -83,7 +83,7 @@ namespace BurcatProtocol
 
         public static BurcatField[] GetFields(IBurcatObject objectBDP)
         {
-            if (Fields.TryGetValue(new(objectBDP), out ConcurrentDictionary<ObjectField, byte>? fields)) return [.. fields.Keys.Where(f => f.GetFunction is not null).Select(f => new BurcatField(f.PublicName, (IBurcatObject?)f.GetFunction!(objectBDP)))];
+            if (Fields.TryGetValue(new(objectBDP), out ConcurrentDictionary<ObjectField, byte>? fields)) return [.. fields.Keys.Where(f => f.GetFunction is not null).Select(f => new BurcatField(f.PublicName, BurcatTranslator.ObjectTranslate(f.GetFunction!(objectBDP))))];
             else return [];
         }
 
@@ -94,12 +94,28 @@ namespace BurcatProtocol
 
             if (Fields[objectBDP is null ? GuidList.FromType(objectType) : new(objectBDP)].Keys.FirstOrDefault(k => k.CompareTo(same) == 0) is ObjectField f)
                 if (f.SetAction is Action<object?, object?> action)
-                    if (!validate || Validator.TryValidateValue(field.Value, new ValidationContext(field.Value ?? NothingChart.Instance) { MemberName = f.PublicName }, validations, f.Validations))
+                {
+                    object? value = field.Value;
+                    bool invokable = true;
+
+                    if (value is null && !f.CanBeNull) invokable = false;
+                    else if (value is object fValue)
                     {
-                        action(objectBDP, field.Value);
-                        return null;
+                        if (f.FieldType.IsAssignableFrom(fValue.GetType())) value = fValue;
+                        else if (fValue is BurcatTranslation translation && BurcatTranslator.TryTranslate(translation, out value) && f.FieldType.IsAssignableFrom(fValue.GetType())) invokable = true;
                     }
-                    else return new BurcatValidationException($"Validation failed at field with name {field.Name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
+
+                    if (invokable)
+                    {
+                        if (!validate || Validator.TryValidateValue(value, new ValidationContext(value ?? NothingChart.Instance) { MemberName = f.PublicName }, validations, f.Validations))
+                        {
+                            action(objectBDP, value);
+                            return null;
+                        }
+                        else return new BurcatValidationException($"Validation failed at field with name {field.Name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
+                    }
+                    else return new BurcatException("The object cannot be converted to the field type.");
+                }
                 else return new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} has no setter cached.");
             else return new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} is not cached.");
         }
@@ -108,17 +124,16 @@ namespace BurcatProtocol
         {
             if (Constructors.TryGetValue(GuidList.FromType(objectType), out ConcurrentDictionary<ObjectMethod, byte>? constructors))
             {
-                LinkedList<ValidationResult> results = [];
-
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryDirectInvoke(null, parameters);
                     if (result.SuccessfulExecution) return result.Value;
                 }
 
+                BurcatList<string> failedMessages = [];
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
-                    ActionResult result = constructor.TryInvoke(null, parameters, out IEnumerable<string> _);
+                    ActionResult result = constructor.TryInvoke(null, parameters, false, out IEnumerable<string> _);
                     if (result.SuccessfulExecution) return result.Value;
                 }
 
@@ -133,7 +148,7 @@ namespace BurcatProtocol
             for (int i = 0; i < parameters.Length && parameters[i] is BurcatType type; i++) genericTypesList.AddLast(type.Nullable ? type.GetTypeCLR().MakeGenericType() : type.GetTypeCLR());
             Type[] genericTypes = [.. genericTypesList];
 
-            MethodKey key = new(GuidList.FromType(objectType), GuidList.FromTypes(genericTypes), name);
+            MethodKey key = new(GuidList.FromType(objectType), genericTypes.Length == 0 ? GuidList.Empty : GuidList.FromTypes(genericTypes), name);
             if (genericTypes.Length != 0)
             {
                 IBurcatObject?[] tmp = parameters;
@@ -160,7 +175,7 @@ namespace BurcatProtocol
                 foreach (ObjectMethod method in methods.Keys)
                 {
                     LinkedList<ValidationResult> validations = [];
-                    ActionResult result = method.TryInvoke(objectBDP, parameters, out IEnumerable<string> failedValidations);
+                    ActionResult result = method.TryInvoke(objectBDP, parameters, true, out IEnumerable<string> failedValidations);
                     if (result.SuccessfulExecution)
                         if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingChart.Instance), validations, method.ObjectValidations)) return result;
                         else return ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided.")));
@@ -200,8 +215,7 @@ namespace BurcatProtocol
                 var castTarget = Expression.Convert(target, info.DeclaringType!);
                 var fieldAccess = Expression.Field(isStatic ? null : castTarget, info);
                 var castResult = Expression.Convert(fieldAccess, typeof(object));
-                var lambda = Expression.Lambda<Func<object?, object?>>(castResult, target);
-                return t => BurcatTranslator.FullObjectTranslate(lambda.Compile()(t));
+                return Expression.Lambda<Func<object?, object?>>(castResult, target).Compile();
             }
             private static Func<object?, object?> CreateGetter(PropertyInfo info, bool isStatic)
             {
@@ -209,8 +223,7 @@ namespace BurcatProtocol
                 var castTarget = Expression.Convert(target, info.DeclaringType!);
                 var propertyAccess = Expression.Property(isStatic ? null : castTarget, info);
                 var castResult = Expression.Convert(propertyAccess, typeof(object));
-                var lambda = Expression.Lambda<Func<object?, object?>>(castResult, target);
-                return t => BurcatTranslator.FullObjectTranslate(lambda.Compile()(t));
+                return Expression.Lambda<Func<object?, object?>>(castResult, target).Compile();
             }
 
             public static Action<object?, object?> CreateSetter(FieldInfo info, bool isStatic)
@@ -235,7 +248,9 @@ namespace BurcatProtocol
             private Type DeclaringType { get; }
             private string Key { get; }
 
+            public Type FieldType { get; }
             public string PublicName { get; }
+            public bool CanBeNull { get; }
             public bool IsStatic { get; }
             public Func<object?, object?>? GetFunction { get; private set; }
             public Action<object?, object?>? SetAction { get; private set; }
@@ -247,6 +262,7 @@ namespace BurcatProtocol
                 DeclaringType = declaringType;
                 Key = field.Name.ToLower().Replace("_", null);
 
+                FieldType = typeof(object);
                 PublicName = field.Name;
 
                 Validations = [];
@@ -256,7 +272,9 @@ namespace BurcatProtocol
                 DeclaringType = info.DeclaringType!;
                 Key = info.Name.ToLower().Replace("_", null);
 
+                FieldType = info.FieldType;
                 PublicName = info.Name;
+                CanBeNull = info.CanBeNull();
                 IsStatic = info.IsStatic;
 
                 GetFunction = CreateGetter(info, IsStatic);
@@ -269,7 +287,9 @@ namespace BurcatProtocol
                 DeclaringType = info.DeclaringType!;
                 Key = info.Name.ToLower().Replace("_", null);
 
+                FieldType = info.PropertyType;
                 PublicName = info.Name;
+                CanBeNull = info.CanBeNull();
                 IsStatic = (info.GetGetMethod()?.IsStatic ?? false) || (info.GetSetMethod()?.IsStatic ?? false);
 
                 if (info.CanRead) GetFunction = CreateGetter(info, IsStatic);
@@ -466,23 +486,27 @@ namespace BurcatProtocol
             {
                 if (Parameters.Count == parameters.Length)
                 {
+                    object?[] values = new object?[parameters.Length];
                     bool invokable = true;
+
                     for (int i = 0; i < parameters.Length && invokable; i++)
-                        if (parameters[i] is null && !Parameters[i].CanBeNull()) invokable = false;
+                        if (parameters[i] is null && Parameters[i].CanBeNull()) values[i] = null;
                         else if (parameters[i] is object pValue)
                         {
-                            if (Parameters[i].ParameterType != pValue.GetType()) invokable = false;
-                            else if (parameters[i] is not BurcatTranslation translation || !BurcatTranslator.CanTranslate(translation.ClassID, out Type? translationType) || Parameters[i].ParameterType != translationType) invokable = false;
+                            if (Parameters[i].ParameterType.IsAssignableFrom(pValue.GetType())) values[i] = parameters[i];
+                            else if (parameters[i] is BurcatTranslation translation && BurcatTranslator.TryTranslate(translation, out object? translationValue) && Parameters[i].ParameterType.IsAssignableFrom(translationValue.GetType())) values[i] = translationValue;
+                            else invokable = false;
                         }
+                        else invokable = false;
 
                     if (invokable)
                     {
                         foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                            if (!Validator.TryValidateValue(parameters[kvp.Key], new ValidationContext(parameters[kvp.Key] ?? NothingChart.Instance), null, kvp.Value))
+                            if (!Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingChart.Instance), null, kvp.Value))
                                 return ActionResult.Unsuccessful;
 
-                        object? result = target is null ? StaticDelegate!(parameters) : InstanceDelegate!(target, parameters);
-                        if (result is object obj) return new(BurcatTranslator.Translate(obj));
+                        object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
+                        if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
                         else return new(null);
                     }
                     else return ActionResult.Unsuccessful;
@@ -490,7 +514,7 @@ namespace BurcatProtocol
                 else return ActionResult.Unsuccessful;
             }
 
-            public ActionResult TryInvoke(IBurcatObject? target, IBurcatObject?[] parameters, out IEnumerable<string> validations)
+            public ActionResult TryInvoke(IBurcatObject? target, IBurcatObject?[] parameters, bool validate, out IEnumerable<string> validations)
             {
                 validations = [];
                 if (Parameters.Count == parameters.Length)
@@ -500,32 +524,23 @@ namespace BurcatProtocol
 
                     for (int i = 0; i < parameters.Length && invokable; i++)
                     if (Transformable.TryDynamicCast(parameters[i], Parameters[i], out object? value)) values[i] = value;
-                    else if (parameters[i] is BurcatTranslation translation && BurcatTranslator.TryTranslate(translation, out value) && Transformable.TryDynamicCast(parameters[i], Parameters[i], out value)) values[i] = value;
+                    else if (parameters[i] is BurcatTranslation translation && BurcatTranslator.TryTranslate(translation, out value) && Transformable.TryDynamicCast(value, Parameters[i], out value)) values[i] = value;
                     else invokable = false;
 
                     LinkedList<ValidationResult> failedValidations = [];
                     if (invokable)
                     {
                         foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                            if (!Validator.TryValidateValue(parameters[kvp.Key], new ValidationContext(parameters[kvp.Key] ?? NothingChart.Instance), failedValidations, kvp.Value))
+                            if (validate && !Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingChart.Instance), failedValidations, kvp.Value))
                             { validations = failedValidations.Where(v => v.ErrorMessage is not null).Select(v => v.ErrorMessage!); return ActionResult.Unsuccessful; }
 
                         object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
-                        if (result is object obj) return new(BurcatTranslator.Translate(obj));
+                        if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
                         else return new(null);
                     }
                     else return ActionResult.Unsuccessful;
                 }
                 else return ActionResult.Unsuccessful;
-            }
-
-            public bool ValidateParameters(IBurcatObject?[] parameters)
-            {
-                foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                    if (!Validator.TryValidateValue(parameters[kvp.Key], new ValidationContext(parameters[kvp.Key] ?? NothingChart.Instance), null, kvp.Value))
-                        return false;
-
-                return true;
             }
         }
 
@@ -537,7 +552,7 @@ namespace BurcatProtocol
 
             public MethodKey(GuidList classGuid, GuidList methodGuid, string name) { ClassGuid = classGuid; Name = name.ToLower().Replace("_", null); MethodGuid = methodGuid; }
             public MethodKey(GuidList classGuid, GuidList methodGuid, MethodInfo info) : this(classGuid, methodGuid, info.Name) { }
-            public MethodKey(GuidList classGuid, MethodInfo info) : this(classGuid, new(), info.Name) { }
+            public MethodKey(GuidList classGuid, MethodInfo info) : this(classGuid, GuidList.Empty, info.Name) { }
 
             public override bool Equals(object? obj)
             {

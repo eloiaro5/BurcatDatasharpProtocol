@@ -423,13 +423,12 @@ namespace BurcatProtocol
         public static BurcatException? SendDestruct<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendDestructAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
         public static BurcatException? SendDestruct<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDestructAsync<T>(stream, objectBDP, token).GetAwaiter().GetResult();
 
-        private static async Task<ActionResult> RelayActionAsync(Guid? streamID, BurcatInstance instance, string action, IBurcatObject?[]? parameters, bool ignoreInternal, CancellationToken? token)
+        private static async Task<ActionResult> RelayActionAsync(Guid? streamID, BurcatInstance instance, string action, object?[]? parameters, bool ignoreInternal, CancellationToken? token)
         {
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                parameters ??= [];
 
                 ActionResult result = InternalProvider.ExecuteAction(streamID, instance.Type, instance.Value, action, parameters);
                 cancellation.ThrowIfCancellationRequested();
@@ -440,16 +439,18 @@ namespace BurcatProtocol
                 return result;
             }
         }
-        public static Task<ActionResult> RelayActionAsync(BurcatInstance instance, string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(null, instance, action, parameters, ignoreInternal, token);
-        public static Task<ActionResult> RelayActionAsync<T>(T objectBDP, string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(objectBDP), action, parameters, ignoreInternal, token);
-        public static Task<ActionResult> RelayActionAsync<T>(string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(typeof(T), null), action, parameters, ignoreInternal, token);
-        public static ActionResult RelayAction(BurcatInstance instance, string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
-        public static ActionResult RelayAction<T>(T objectBDP, string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(objectBDP), action, parameters, ignoreInternal, token);
-        public static ActionResult RelayAction<T>(string action, IBurcatObject?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(typeof(T), null), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(null, instance, action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(objectBDP), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(typeof(T), null), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
+        public static ActionResult RelayAction<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(objectBDP), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(typeof(T), null), action, parameters, ignoreInternal, token);
 
 
-        public static async Task<ActionResult> SendActionAsync(IdentifiedStream stream, BurcatInstance instance, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null)
+        public static async Task<ActionResult> SendActionAsync(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null)
         {
+            IBurcatObject?[] burcatParameters = BurcatTranslator.ObjectsTranslate(parameters);
+
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
@@ -457,7 +458,6 @@ namespace BurcatProtocol
                 {
                     CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
                     if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-                    parameters ??= [];
 
                     await stream.WriteAsync(GetClassIdentity<BeginActionSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
@@ -482,8 +482,8 @@ namespace BurcatProtocol
                     cancellation.ThrowIfCancellationRequested();
 
                     await stream.WriteAsync(GetClassIdentity<ParameterScheme>().ToByteArray(), cancellation);
-                    await stream.WriteAsync(BitConverter.GetBytes(parameters.Length), cancellation);
-                    foreach (IBurcatObject? parameter in parameters)
+                    await stream.WriteAsync(BitConverter.GetBytes(burcatParameters.Length), cancellation);
+                    foreach (IBurcatObject? parameter in burcatParameters)
                     {
                         cancellation.ThrowIfCancellationRequested();
 
@@ -505,11 +505,11 @@ namespace BurcatProtocol
                 finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
             }
         }
-        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, T objectBDP, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(objectBDP), action, parameters, token);
-        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(typeof(T), null), action, parameters, token);
-        public static ActionResult SendAction(IdentifiedStream stream, BurcatInstance instance, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null) => SendActionAsync(stream, instance, action, parameters, token).GetAwaiter().GetResult();
-        public static ActionResult SendAction<T>(IdentifiedStream stream, T objectBDP, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(objectBDP), action, parameters, token);
-        public static ActionResult SendAction<T>(IdentifiedStream stream, string action, IBurcatObject?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(typeof(T), null), action, parameters, token);
+        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(objectBDP), action, parameters, token);
+        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(typeof(T), null), action, parameters, token);
+        public static ActionResult SendAction(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null) => SendActionAsync(stream, instance, action, parameters, token).GetAwaiter().GetResult();
+        public static ActionResult SendAction<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(objectBDP), action, parameters, token);
+        public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(typeof(T), null), action, parameters, token);
 
         public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
         public static IExternalProvider? ExternalProvider { get; set; }
@@ -600,7 +600,7 @@ namespace BurcatProtocol
                     BurcatException? creationException = await RelayConstructAsync(streamID, reference, false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, creationException, cancellation);
+                    await SendObject(stream, creationException is BurcatException exception ? new(exception) : new(typeof(BurcatException)), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<EndConstructSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndConstructSchematic>()}, but data read doesn't correspond to");
@@ -644,7 +644,7 @@ namespace BurcatProtocol
                     BurcatException? updateException = await RelayUpdateAsync(streamID, classID, objectID == Guid.AllBitsSet ? null : objectID, field, false, token);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, updateException, cancellation);
+                    await SendObject(stream, updateException is BurcatException exception ? new(exception) : new(typeof(BurcatException)), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<EndUpdateSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndUpdateSchematic>()}, but data read doesn't correspond to");
@@ -679,7 +679,7 @@ namespace BurcatProtocol
                     BurcatException? destroyException = await RelayDestructAsync(streamID, classID, objectID, false, token);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, destroyException, cancellation);
+                    await SendObject(stream, destroyException is BurcatException exception ? new(exception) : new(typeof(BurcatException)), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<EndDestructSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndDestructSchematic>()}, but data read doesn't correspond to");

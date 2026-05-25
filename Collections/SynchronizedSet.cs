@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -26,7 +26,7 @@ namespace BurcatProtocol.Collections
         public bool Add(I item) => AddAsync(item).GetAwaiter().GetResult();
         public async Task<bool> AddAsync(I item, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(set), nameof(set.Add), BurcatTranslator.FullObjectsTranslate([item]), token: token)).SuccessfulExecution) return set.Add(item);
+            if ((await BurcatChat.RelayActionAsync(new(set), nameof(set.Add), BurcatTranslator.ObjectsTranslate([item]), token: token)).SuccessfulExecution) return set.Add(item);
             else throw new SynchronizationException();
         }
 
@@ -40,7 +40,7 @@ namespace BurcatProtocol.Collections
         public bool Remove(I item) => RemoveAsync(item).GetAwaiter().GetResult();
         public async Task<bool> RemoveAsync(I item, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(set), nameof(set.Remove), BurcatTranslator.FullObjectsTranslate([item]), token: token)).SuccessfulExecution) return set.Remove(item);
+            if ((await BurcatChat.RelayActionAsync(new(set), nameof(set.Remove), BurcatTranslator.ObjectsTranslate([item]), token: token)).SuccessfulExecution) return set.Remove(item);
             else throw new SynchronizationException();
         }
 
@@ -62,6 +62,6 @@ namespace BurcatProtocol.Collections
         void ICollection<I>.Add(I item) => set.Add(item);
         IEnumerator IEnumerable.GetEnumerator() => set.GetEnumerator();
 
-        public override IBurcatObject?[] GetBurcatConstructionValues() => [new BurcatType(typeof(S)), set];
+        public override object?[] GetBurcatConstructionValues() => [new BurcatType(typeof(S)), set];
     }
 }

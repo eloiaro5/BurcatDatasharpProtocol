@@ -29,7 +29,7 @@ namespace BurcatProtocol
 
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
         bool IBurcatObject.SetBurcatField(BurcatField field) => false;
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(T), false), Value]);
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([new BurcatType(typeof(T), false), Value]);
 
         public static bool operator ==(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => i1 is null && i2 is null || (i1 is not null && i2 is not null && i1.Value.Value == i2.Value.Value);
         public static bool operator !=(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => !(i1 != i2);

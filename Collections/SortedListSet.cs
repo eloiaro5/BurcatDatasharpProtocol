@@ -1,4 +1,4 @@
-﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Annotations;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -151,10 +151,10 @@ namespace BurcatProtocol.Collections
         void ICollection<T>.Add(T item) => Add(item);
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-        public override IBurcatObject?[] GetBurcatConstructionValues()
+        public override object?[] GetBurcatConstructionValues()
         {
-            if (Comparer is IEqualityComparer<T> comparer) return BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(T)), Identifier, items, (IBurcatObject)comparer]);
-            else return BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(T)), Identifier, items]);
+            if (Comparer is IEqualityComparer<T> comparer) return [new BurcatType(typeof(T)), Identifier, items, (IBurcatObject)comparer];
+            else return [new BurcatType(typeof(T)), Identifier, items];
         }
 
         private class SetEqualityComparer : IEqualityComparer<T>

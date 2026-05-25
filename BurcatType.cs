@@ -28,6 +28,6 @@ namespace BurcatProtocol
 
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
         bool IBurcatObject.SetBurcatField(BurcatField field) => false;
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([ClassID, Nullable]);
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([ClassID, Nullable]);
     }
 }

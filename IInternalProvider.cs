@@ -16,7 +16,7 @@ namespace BurcatProtocol
         BurcatException? UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field);
         BurcatException? DestroyObject(Guid? streamID, Type objectType, Guid objectID);
 
-        ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, IBurcatObject?[] parameters);
+        ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters);
     }
 
     public abstract class InternalProvider : IInternalProvider
@@ -53,10 +53,10 @@ namespace BurcatProtocol
             return BurcatCache.SetField(objectType, objectBDP, field, true);
         }
 
-        public virtual ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, IBurcatObject?[] parameters)
+        public virtual ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
             BurcatCache.AddToCache(objectType);
-            return BurcatCache.ExecuteAction(objectType, objectBDP, action, parameters);
+            return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
         }
 
         public abstract IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);

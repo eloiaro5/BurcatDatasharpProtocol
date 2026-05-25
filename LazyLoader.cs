@@ -53,7 +53,7 @@ namespace BurcatProtocol
 
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
         bool IBurcatObject.SetBurcatField(BurcatField field) => false;
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(T), false), ObjectID, CanSet]);
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([new BurcatType(typeof(T), false), ObjectID, CanSet]);
 
         public static explicit operator LazyLoader<T>(BurcatIdentifier<T> identifier) => new(identifier.Value);
         public static explicit operator LazyLoader<T>(T objectBDP) => new(objectBDP.Identifier);

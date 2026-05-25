@@ -5,7 +5,6 @@ C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtoc
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.AssemblyInfoInputs.cache
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.AssemblyInfo.cs
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.csproj.CoreCompileInputs.cache
-C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.sourcelink.json
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.dll
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\refint\BurcatProtocol.dll
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.pdb

@@ -28,6 +28,7 @@ namespace BurcatProtocol
                 return true;
             }
         }
+        public static bool Add<T>(Guid classID) where T : Enum => Add(classID, v => BitConverter.GetBytes(Convert.ToInt64(v)), t => (T)Enum.ToObject(typeof(T), BitConverter.ToInt64(t)));
         public static bool Remove(Guid classID) => Translators.Remove(classID) && TypeDictionary.Remove(TypeDictionary.First(kvp => kvp.Value == classID).Key);
         public static bool Remove(Type type)
         {
@@ -54,7 +55,7 @@ namespace BurcatProtocol
                 return false;
             }
         }
-        public static bool CanTranslate(Type type, out Guid classID) => TypeDictionary.TryGetValue(type, out classID) || (type.IsEnum && BurcatChat.TryGetClassIdentity(type, out classID));
+        public static bool CanTranslate(Type type, out Guid classID) => TypeDictionary.TryGetValue(type, out classID);
 
         public static bool TryTranslate(object value, [MaybeNullWhen(false)] out BurcatTranslation translation) => TryTranslate(value.GetType(), value, out translation);
         public static bool TryTranslate(Type valueType, object value, [MaybeNullWhen(false)] out BurcatTranslation translation)
@@ -119,28 +120,53 @@ namespace BurcatProtocol
         public static object Translate(BurcatTranslation translation) => Translate(translation.ClassID, translation.Data);
         public static T Translate<T>(BurcatTranslation translation) => (T)Translate(translation.ClassID, translation.Data);
 
-        public static IBurcatObject? FullObjectTranslate(object? value)
+        public static object? ObjectBDPTranslate(IBurcatObject? value)
+        {
+            if (value is IBurcatObject objectBDP)
+            {
+                if (objectBDP is NothingChart) return null;
+                else if (objectBDP is BurcatTranslation translation) return Translate(translation);
+                else return objectBDP;
+            }
+            else return null;
+        }
+        public static object?[] ObjectsBDPTranslate(IBurcatObject?[]? values)
+        {
+            if (values is null) return [];
+            else
+            {
+                object?[] objects = new object[values.Length];
+                for (int i = 0; i < values.Length; i++) objects[i] = ObjectBDPTranslate(values[i]);
+                return objects;
+            }
+        }
+
+        public static IBurcatObject? ObjectTranslate(object? value)
         {
             if (value is null || value is NothingChart) return null;
             else if (CanTranslate(value.GetType(), out Guid classID)) return new BurcatTranslation(classID, Translators[classID].ToBDP(value));
             else if (value is IBurcatObject objectBDP) return objectBDP;
             else throw new InvalidCastException();
         }
-        public static IBurcatObject?[] FullObjectsTranslate(object?[] values)
+        public static IBurcatObject?[] ObjectsTranslate(object?[]? values)
         {
-            IBurcatObject?[] translations = new IBurcatObject?[values.Length];
-            for (int i = 0; i < values.Length; i++)
+            if (values is null) return [];
+            else
             {
-                if (values[i] is object value)
+                IBurcatObject?[] translations = new IBurcatObject?[values.Length];
+                for (int i = 0; i < values.Length; i++)
                 {
-                    if (value is NothingChart) translations[i] = null;
-                    else if (CanTranslate(value.GetType(), out Guid classID)) translations[i] = new BurcatTranslation(classID, Translators[classID].ToBDP(value));
-                    else if (value is IBurcatObject objectBDP) translations[i] = objectBDP;
-                    else throw new InvalidCastException();
+                    if (values[i] is object value)
+                    {
+                        if (value is NothingChart) translations[i] = null;
+                        else if (CanTranslate(value.GetType(), out Guid classID)) translations[i] = new BurcatTranslation(classID, Translators[classID].ToBDP(value));
+                        else if (value is IBurcatObject objectBDP) translations[i] = objectBDP;
+                        else throw new InvalidCastException();
+                    }
                 }
-            }
 
-            return translations;
+                return translations;
+            }
         }
 
         public static void LoadDefaults()
@@ -160,9 +186,9 @@ namespace BurcatProtocol
             Add(new("00000000-0000-0000-0000-F00000000012"), v => [.. decimal.GetBits(v).SelectMany(BitConverter.GetBytes)], t => (decimal)BitConverter.ToInt64(t));
             Add(new("00000000-0000-0000-0000-F00000000013"), BitConverter.GetBytes, t => BitConverter.ToChar(t));
             Add(new("00000000-0000-0000-0000-F00000000014"), Encoding.UTF8.GetBytes, Encoding.UTF8.GetString);
-            Add(new("00000000-0000-0000-0000-F00000000015"), v => BitConverter.GetBytes(v.ToBinary()), t => new DateTime(BitConverter.ToInt64(t)));
-            Add(new("00000000-0000-0000-0000-F00000000016"), v => BitConverter.GetBytes(v.ToDateTime(new()).ToBinary()), t => DateOnly.FromDateTime(new(BitConverter.ToInt64(t))));
-            Add(new("00000000-0000-0000-0000-F00000000017"), v => BitConverter.GetBytes(DateOnly.FromDateTime(DateTime.Today).ToDateTime(v).ToBinary()), t => TimeOnly.FromDateTime(new(BitConverter.ToInt64(t))));
+            Add(new("00000000-0000-0000-0000-F00000000015"), v => BitConverter.GetBytes(v.ToBinary()), t => DateTime.FromBinary(BitConverter.ToInt64(t)));
+            Add(new("00000000-0000-0000-0000-F00000000016"), v => BitConverter.GetBytes(v.ToDateTime(new()).ToBinary()), t => DateOnly.FromDateTime(DateTime.FromBinary(BitConverter.ToInt64(t))));
+            Add(new("00000000-0000-0000-0000-F00000000017"), v => BitConverter.GetBytes(DateOnly.FromDateTime(DateTime.Today).ToDateTime(v).ToBinary()), t => TimeOnly.FromDateTime(DateTime.FromBinary(BitConverter.ToInt64(t))));
             Add(new("00000000-0000-0000-0000-F00000000018"), v => BitConverter.GetBytes(v.Ticks), t => new TimeSpan(BitConverter.ToInt64(t)));
             Add(new("00000000-0000-0000-0000-F00000000019"), v => v.ToByteArray(), t => new Guid(t));
 
@@ -177,7 +203,7 @@ namespace BurcatProtocol
             Add(new("00000000-0000-0000-0000-F10000000008"), v => [.. v.SelectMany(BitConverter.GetBytes)], t => SpanTranslation(t, 8, t => (ulong)BitConverter.ToInt64(t)));
             Add(new("00000000-0000-0000-0000-F10000000010"), v => [.. v.SelectMany(BitConverter.GetBytes)], t => SpanTranslation(t, 4, t => BitConverter.ToSingle(t)));
             Add(new("00000000-0000-0000-0000-F10000000011"), v => [.. v.SelectMany(BitConverter.GetBytes)], t => SpanTranslation(t, 8, t => BitConverter.ToDouble(t)));
-            Add(new("00000000-0000-0000-0000-F10000000012"), v => [.. decimal.GetBits(v).SelectMany(x => BitConverter.GetBytes(x))], t => new decimal(SpanTranslation(t, 4, b => BitConverter.ToInt32(b, 0))));
+            Add(new("00000000-0000-0000-0000-F10000000012"), v => [.. v.SelectMany(d => decimal.GetBits(d).SelectMany(BitConverter.GetBytes))], t => SpanTranslation(t, 16, b => new decimal(SpanTranslation(b, 4, i => BitConverter.ToInt32(i, 0)))));
             Add(new("00000000-0000-0000-0000-F10000000013"),    v => [.. v.SelectMany(x => BitConverter.GetBytes(x))],    t => SpanTranslation(t, 2, b => BitConverter.ToChar(b, 0)));
             Add(new("00000000-0000-0000-0000-F10000000014"), EncodeStringArray, DecodeStringArray);
             Add(new("00000000-0000-0000-0000-F10000000015"), v => [.. v.SelectMany(x => BitConverter.GetBytes(x.ToBinary()))], t => SpanTranslation(t, 8, b => DateTime.FromBinary(BitConverter.ToInt64(b, 0))));

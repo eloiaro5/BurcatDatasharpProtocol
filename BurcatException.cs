@@ -57,7 +57,7 @@ namespace BurcatProtocol
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
         bool IBurcatObject.SetBurcatField(BurcatField field) => false;
 
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([Message, StackTrace, Payload, InnerException]);
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([Message, StackTrace, Payload, InnerException]);
     }
 
     [BurcatIdentity("00000000-0000-0000-0000-493ba25085b5")]

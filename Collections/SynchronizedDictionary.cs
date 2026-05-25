@@ -1,4 +1,4 @@
-﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Annotations;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -34,7 +34,7 @@ namespace BurcatProtocol.Collections
         public void Add(K key, V value) => AddAsync(key, value).GetAwaiter().GetResult();
         public async Task AddAsync(K key, V value, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(dictionary), nameof(dictionary.Add), BurcatTranslator.FullObjectsTranslate([key, value]), token: token)).SuccessfulExecution) dictionary.Add(key, value);
+            if ((await BurcatChat.RelayActionAsync(new(dictionary), nameof(dictionary.Add), BurcatTranslator.ObjectsTranslate([key, value]), token: token)).SuccessfulExecution) dictionary.Add(key, value);
             else throw new SynchronizationException();
         }
 
@@ -55,7 +55,7 @@ namespace BurcatProtocol.Collections
         public bool Remove(K key) => RemoveAsync(key).GetAwaiter().GetResult();
         public async Task<bool> RemoveAsync(K key, CancellationToken? token = null)
         {
-            if ((await BurcatChat.RelayActionAsync(new(dictionary), nameof(dictionary.Remove), BurcatTranslator.FullObjectsTranslate([key]), token: token)).SuccessfulExecution) return dictionary.Remove(key);
+            if ((await BurcatChat.RelayActionAsync(new(dictionary), nameof(dictionary.Remove), BurcatTranslator.ObjectsTranslate([key]), token: token)).SuccessfulExecution) return dictionary.Remove(key);
             else throw new SynchronizationException();
         }
 
@@ -76,6 +76,6 @@ namespace BurcatProtocol.Collections
         IEnumerable<V> IReadOnlyDictionary<K, V>.Values => Values;
         IEnumerator IEnumerable.GetEnumerator() => dictionary.GetEnumerator();
 
-        public override IBurcatObject?[] GetBurcatConstructionValues() => [new BurcatType(typeof(D)), dictionary];
+        public override object?[] GetBurcatConstructionValues() => [new BurcatType(typeof(D)), dictionary];
     }
 }

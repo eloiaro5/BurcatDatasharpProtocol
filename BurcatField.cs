@@ -6,7 +6,7 @@ namespace BurcatProtocol
     [BurcatIdentity("00000000-0000-0000-0000-0e1c35c74b6f")]
     public sealed class BurcatField : IBurcatObject
     {
-        public static BurcatField FromExpression<T>(T instance, Expression<Func<T, IBurcatObject?>> expression)
+        public static BurcatField FromExpression<T>(T instance, Expression<Func<T, object?>> expression)
         {
             if (expression == null) throw new ArgumentNullException(nameof(expression));
             else
@@ -21,7 +21,7 @@ namespace BurcatProtocol
                 return new(member.Member.Name, expression.Compile()(instance));
             }
         }
-        public static BurcatField FromExpression<T>(Expression<Func<IBurcatObject?>> expression)
+        public static BurcatField FromExpression<T>(Expression<Func<object?>> expression)
         {
             if (expression == null) throw new ArgumentNullException(nameof(expression));
             else
@@ -40,12 +40,12 @@ namespace BurcatProtocol
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public string Name { get; }
-        public IBurcatObject? Value { get; }
+        public object? Value { get; }
 
-        public BurcatField(string name, IBurcatObject? value) { Name = name; Value = value is NothingChart ? null : value; }
+        public BurcatField(string name, object? value) { Name = name; Value = value is NothingChart ? null : value; }
 
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
         bool IBurcatObject.SetBurcatField(BurcatField field) => false;
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.FullObjectsTranslate([Name, Value]);
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([Name, Value]);
     }
 }

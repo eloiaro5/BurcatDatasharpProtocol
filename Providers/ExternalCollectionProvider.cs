@@ -75,7 +75,7 @@ namespace BurcatProtocol.Providers
             return null;
         }
 
-        public async Task<ActionResult> ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, IBurcatObject?[] parameters, CancellationToken token)
+        public async Task<ActionResult> ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {

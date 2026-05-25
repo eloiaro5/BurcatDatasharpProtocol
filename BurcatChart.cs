@@ -28,6 +28,19 @@ namespace BurcatProtocol
         IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => [];
     }
 
+    [BurcatIdentity("00000000-0000-0000-0000-74128b765b52")]
+    public sealed class PurgeChart : IBurcatObject
+    {
+        Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+
+        public static PurgeChart Instance { get; } = new();
+
+        BurcatField[] IBurcatObject.GetBurcatFields() => [];
+        bool IBurcatObject.SetBurcatField(BurcatField field) => false;
+
+        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => [];
+    }
+
     [BurcatIdentity("00000000-0000-0000-0000-3674efed6bed")]
     public sealed class EndOfCommunicationChart : IBurcatObject
     {

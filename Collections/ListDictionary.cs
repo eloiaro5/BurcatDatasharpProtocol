@@ -1,4 +1,4 @@
-﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Annotations;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -164,13 +164,13 @@ namespace BurcatProtocol.Collections
         IEnumerable<TV> IReadOnlyDictionary<TK, TV>.Values => Values;
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-        public override sealed IBurcatObject?[] GetBurcatConstructionValues()
+        public override sealed object?[] GetBurcatConstructionValues()
         {
             BurcatList<KeyValueDuo<TK, TV>> list = new(keys.Count);
             for (int i = 0; i < list.Count; i++) list.Add(new(keys[i], values[i]));
 
-            if (Comparer is IEqualityComparer<TK> comparer) return BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(TK), false), new BurcatType(typeof(TV)), Identifier, list, (IBurcatObject)comparer]);
-            else return BurcatTranslator.FullObjectsTranslate([new BurcatType(typeof(TK), false), new BurcatType(typeof(TV)), Identifier, list]);
+            if (Comparer is IEqualityComparer<TK> comparer) return [new BurcatType(typeof(TK), false), new BurcatType(typeof(TV)), Identifier, list, (IBurcatObject)comparer];
+            else return [new BurcatType(typeof(TK), false), new BurcatType(typeof(TV)), Identifier, list];
         }
     }
 }
