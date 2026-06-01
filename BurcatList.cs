@@ -47,18 +47,26 @@ namespace BurcatProtocol
             set
             {
                 if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
-                else values[index] = value;
+                else
+                {
+                    if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+                    values[index] = value;
+                }
             }
         }
 
         public void Add(T item)
         {
+            if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
             EnsureCapacity(Count + 1);
             values[Count++] = item;
         }
 
         public void Clear()
         {
+            if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
             Array.Clear(values, 0, Count);
             Count = 0;
         }
@@ -84,6 +92,7 @@ namespace BurcatProtocol
             if (index < 0 || index > Count) throw new ArgumentOutOfRangeException(nameof(index));
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
                 EnsureCapacity(Count + 1);
 
                 Array.Copy(values, index, values, index + 1, Count - index);
@@ -98,6 +107,8 @@ namespace BurcatProtocol
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 RemoveAt(index);
                 return true;
             }
@@ -108,6 +119,8 @@ namespace BurcatProtocol
             if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 Count--;
                 Array.Copy(values, index + 1, values, index, Count - index);
                 values[Count] = default!;

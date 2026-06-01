@@ -38,6 +38,7 @@ namespace BurcatProtocol
         }
 
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public string Name { get; }
         public object? Value { get; }

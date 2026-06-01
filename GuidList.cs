@@ -1,6 +1,10 @@
-﻿namespace BurcatProtocol
+﻿using System.Collections;
+using System.Reflection;
+using System.Runtime.InteropServices;
+
+namespace BurcatProtocol
 {
-    public class GuidList : IComparable<GuidList>
+    public class GuidList : IComparable<GuidList>, IEnumerable<Guid>
     {
         public static GuidList FromType(Type type) => FromTypes([type]);
         public static GuidList FromTypes(IEnumerable<Type> types)
@@ -48,7 +52,7 @@
         public GuidList(Guid guid) : this([guid]) { }
         public GuidList(Guid[] guids) { this.guids = guids; hashCode = ComputeHashCode(guids); }
 
-        public GuidList(IBurcatObject obj)
+        public GuidList(object obj)
         {
             LinkedList<Guid> guids = [];
 
@@ -85,5 +89,12 @@
                 return 0;
             }
         }
+
+        public IEnumerator<Guid> GetEnumerator()
+        {
+            foreach (Guid guid in guids)
+                yield return guid;
+        }
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

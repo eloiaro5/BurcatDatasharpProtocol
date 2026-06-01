@@ -11,6 +11,7 @@ namespace BurcatProtocol
     public sealed class ActionResult : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public static ActionResult Unsuccessful { get; } = new();
         public static ActionResult Thrown(BurcatException exception) => new(exception);

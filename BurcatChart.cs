@@ -6,6 +6,7 @@ namespace BurcatProtocol
     public sealed class NothingChart : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public static NothingChart Instance { get; } = new();
 
@@ -19,6 +20,7 @@ namespace BurcatProtocol
     public sealed class PingChart : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public static PingChart Instance { get; } = new();
 
@@ -32,6 +34,7 @@ namespace BurcatProtocol
     public sealed class PurgeChart : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public static PurgeChart Instance { get; } = new();
 
@@ -45,6 +48,7 @@ namespace BurcatProtocol
     public sealed class EndOfCommunicationChart : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public static EndOfCommunicationChart Instance { get; } = new();
 

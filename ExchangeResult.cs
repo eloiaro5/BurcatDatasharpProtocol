@@ -3,10 +3,10 @@
     public enum BurcatExchangeType
     {
         Object,
-        Request,
-        Construct,
-        Update,
-        Destruct,
+        RevisionRequest,
+        ObjectRequest,
+        Couple,
+        Decouple,
         Action
     }
 
@@ -14,15 +14,14 @@
     {
         public BurcatExchangeType Type { get; }
 
-        public BurcatInstance Recieved { get; }
-        public BurcatInstance? Sent { get; }
+        public object Recieved { get; }
+        public object? Sent { get; }
 
         public IBurcatObject?[]? ArgumentMetadata { get; }
         public Type[]? GenericMetadata { get; }
         public string? NameMetadata { get; }
 
-        public ExchangeResult(BurcatExchangeType type, BurcatInstance recieved, BurcatInstance? sent = null) { Type = type; Recieved = recieved; Sent = sent; }
-        public ExchangeResult(BurcatExchangeType type, BurcatInstance recieved, BurcatInstance sent, string nameMetadata) : this(type, recieved, sent) { NameMetadata = nameMetadata; }
-        public ExchangeResult(BurcatExchangeType type, BurcatInstance recieved, BurcatInstance sent, IBurcatObject?[] argumentMetadata, string nameMetadata) : this(type, recieved, sent, nameMetadata) { ArgumentMetadata = argumentMetadata; }
+        public ExchangeResult(BurcatExchangeType type, object recieved, object? sent = null) { Type = type; Recieved = recieved; Sent = sent; }
+        public ExchangeResult(BurcatExchangeType type, object recieved, object sent, string nameMetadata, IBurcatObject?[] argumentMetadata) : this(type, recieved, sent) { NameMetadata = nameMetadata; ArgumentMetadata = argumentMetadata; }
     }
 }

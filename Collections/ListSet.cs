@@ -48,6 +48,8 @@ namespace BurcatProtocol.Collections
             if (Contains(item)) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 items.Add(item);
                 return true;
             }
@@ -59,6 +61,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 items.RemoveAt(index);
                 return true;
             }
@@ -66,7 +70,11 @@ namespace BurcatProtocol.Collections
 
         public bool Contains(T item) => IndexOf(item) >= 0;
 
-        public void Clear() => items.Clear();
+        public void Clear()
+        {
+            if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+            items.Clear();
+        }
 
         public void CopyTo(T[] array, int arrayIndex) => items.CopyTo(array, arrayIndex);
 

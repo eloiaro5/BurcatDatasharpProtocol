@@ -13,6 +13,7 @@ namespace BurcatProtocol
         public static BurcatComparer Default { get; } = new();
 
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public int Compare(IBurcatObject? x, IBurcatObject? y)
         {
@@ -22,10 +23,15 @@ namespace BurcatProtocol
             else if (ReferenceEquals(x, y)) return 0;
             else
             {
-                Guid xV = BurcatChat.GetClassIdentity(x.GetType()), yV = BurcatChat.GetClassIdentity(y.GetType());
-                if (xV == yV) return x.Identifier.CompareTo(y.Identifier);
-                else if (xV < yV) return -1;
-                else return 1;
+                int comparationV = BurcatChat.GetClassIdentity(x.GetType()).CompareTo(BurcatChat.GetClassIdentity(y.GetType()));
+                if (comparationV == 0)
+                {
+                    int comparationI = x.Identifier.CompareTo(y.Identifier);
+
+                    if (comparationI == 0) return x.Revision.CompareTo(y.Revision);
+                    else return comparationI;
+                }
+                else return comparationV;
             }
         }
 

@@ -9,6 +9,7 @@ namespace BurcatProtocol.Collections
     public readonly struct KeyValueDuo<TK, TV> : IBurcatObject where TK : notnull
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public TK Key { get; }
         public TV Value { get; }

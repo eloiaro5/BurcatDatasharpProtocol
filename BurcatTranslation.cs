@@ -7,7 +7,8 @@ namespace BurcatProtocol
     [BurcatIdentity("00000000-0000-0000-0000-6b9a80e29a67 ")]
     public sealed class BurcatTranslation : IBurcatObject
     {
-        public Guid Identifier { get => Guid.Empty; set => throw new InvalidOperationException(); }
+        public Guid Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public Guid ClassID { get; }
         public byte[] Data { get; }

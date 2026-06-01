@@ -53,7 +53,10 @@ namespace BurcatProtocol.Collections
             if (index >= 0) return false;
             else
             {
-                items.Insert(index, item);
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
+                items.Insert(~index, item);
+
                 return true;
             }
         }
@@ -64,6 +67,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 items.RemoveAt(index);
                 return true;
             }
@@ -71,7 +76,11 @@ namespace BurcatProtocol.Collections
 
         public bool Contains(T item) => BinarySearch(item) >= 0;
 
-        public void Clear() => items.Clear();
+        public void Clear()
+        {
+            if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+            items.Clear();
+        }
 
         public void CopyTo(T[] array, int arrayIndex) => items.CopyTo(array, arrayIndex);
 
@@ -145,7 +154,7 @@ namespace BurcatProtocol.Collections
             else return false;
         }
 
-        private int BinarySearch(T item) => Comparer is IComparer<T> comparer ? items.BinarySearch(item, comparer) : items.BinarySearch(item);
+        private int BinarySearch(T item) => Comparer is IComparer<T> comparer ? items.BinarySearch(0, Count, item, comparer) : items.BinarySearch(0, Count, item, Comparer<T>.Default);
         private IEqualityComparer<T> GetComparer() { EqualityComparer ??= new SetEqualityComparer(this); return EqualityComparer; }
 
         void ICollection<T>.Add(T item) => Add(item);

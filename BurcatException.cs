@@ -23,6 +23,7 @@ namespace BurcatProtocol
         }
 
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public string Message { get; }
         public string? StackTrace { get; }
@@ -63,7 +64,6 @@ namespace BurcatProtocol
     [BurcatIdentity("00000000-0000-0000-0000-493ba25085b5")]
     public class UnsupportedBurcatObjectException : BurcatException
     {
-
         public UnsupportedBurcatObjectException() : base("The object sent is not supported by the current provider.") { }
         public UnsupportedBurcatObjectException(string message, string? stackTrace = null, IBurcatObject? payload = null, BurcatException? innerException = null) : base(message, stackTrace, payload, innerException) { }
     }

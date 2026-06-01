@@ -68,6 +68,8 @@ namespace BurcatProtocol.Collections
                 if (index >= 0) values[index] = value;
                 else
                 {
+                    if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                     keys.Add(key);
                     values.Add(value);
                 }
@@ -79,6 +81,8 @@ namespace BurcatProtocol.Collections
             if (ContainsKey(key)) throw new ArgumentException("Key already exists.", nameof(key));
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 keys.Add(key);
                 values.Add(value);
             }
@@ -92,6 +96,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 keys.RemoveAt(index);
                 values.RemoveAt(index);
                 return true;
@@ -117,6 +123,8 @@ namespace BurcatProtocol.Collections
 
         public void Clear()
         {
+            if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
             keys.Clear();
             values.Clear();
         }
@@ -135,6 +143,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 keys.RemoveAt(index);
                 values.RemoveAt(index);
                 return true;

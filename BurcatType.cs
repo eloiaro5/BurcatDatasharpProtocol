@@ -9,6 +9,7 @@ namespace BurcatProtocol
     public sealed class BurcatType : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         public Guid ClassID { get; }
         public bool Nullable { get; }

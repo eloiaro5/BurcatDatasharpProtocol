@@ -5,7 +5,7 @@ using System.Text;
 
 namespace BurcatProtocol.Providers
 {
-    public sealed class InternalCollectionProvider : BurcatProtocol.InternalProvider, ICollection<IInternalProvider>, IInternalProvider
+    public sealed class InternalCollectionProvider : InternalProvider, ICollection<IInternalProvider>, IInternalProvider
     {
         private LinkedList<IInternalProvider> Providers { get; } = new();
 
@@ -22,40 +22,55 @@ namespace BurcatProtocol.Providers
         public bool Remove(IInternalProvider item) => Providers.Remove(item);
         public IEnumerator<IInternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
-        public override IBurcatObject? GetObject(Guid? streamID, Type type, Guid objectID)
+        public override Guid GetRevision(Guid? streamID, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)
             {
-                IBurcatObject? result = provider.GetObject(streamID, type, objectID);
+                Guid result = provider.GetRevision(streamID, objectType, objectID);
+                if (result != Guid.Empty) return result;
+            }
+
+            return Guid.Empty;
+        }
+
+        public override IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID)
+        {
+            foreach (IInternalProvider provider in Providers)
+            {
+                IBurcatObject? result = provider.GetObject(streamID, objectType, objectID);
                 if (result is not null) return result;
             }
 
             return null;
         }
 
-        public override BurcatException? CreateObject(Guid? streamID, IBurcatObject objectBDP)
+        public override BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested)
         {
             foreach (IInternalProvider provider in Providers)
-                if (provider.CreateObject(streamID, objectBDP) is BurcatException exception)
+                if (provider.CoupleCache(streamID, objectBDP, explicitelyRequested) is BurcatException exception)
                     return exception;
 
             return null;
         }
-        public override BurcatException? UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field)
+        public override BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP)
         {
             foreach (IInternalProvider provider in Providers)
-                if (provider.UpdateObject(streamID, objectType, objectID, field) is BurcatException exception)
+                if (provider.DecoupleCache(streamID, objectBDP) is BurcatException exception)
                     return exception;
 
             return null;
         }
-        public override BurcatException? DestroyObject(Guid? streamID, Type objectType, Guid objectID)
-        {
-            foreach (IInternalProvider provider in Providers)
-                if (provider.DestroyObject(streamID, objectType, objectID) is BurcatException exception)
-                    return exception;
 
-            return null;
+        public override ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
+        {
+            ActionResult result = ActionResult.Unsuccessful;
+            foreach (IInternalProvider provider in Providers)
+            {
+                result = provider.ExecuteAction(streamID, objectType, objectBDP, action, parameters);
+                if (result.Exception is not null) return result;
+            }
+
+            return result;
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

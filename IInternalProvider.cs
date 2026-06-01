@@ -9,19 +9,20 @@ namespace BurcatProtocol
 {
     public interface IInternalProvider
     {
-        IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, IBurcatObject?[] parameters, BurcatField[] fields);
+        IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields);
 
+        Guid GetRevision(Guid? streamID, Type objectType, Guid objectID);
         IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);
-        BurcatException? CreateObject(Guid? streamID, IBurcatObject objectBDP);
-        BurcatException? UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field);
-        BurcatException? DestroyObject(Guid? streamID, Type objectType, Guid objectID);
+
+        BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested);
+        BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP);
 
         ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters);
     }
 
     public abstract class InternalProvider : IInternalProvider
     {
-        public virtual IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, IBurcatObject?[] parameters, BurcatField[] fields)
+        public virtual IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields)
         {
             LinkedList<Type> genericTypes = [];
             for (int i = 0; i < parameters.Length && parameters[i] is BurcatType type; i++) genericTypes.AddLast(type.Nullable ? type.GetTypeCLR().MakeNullable() : type.GetTypeCLR());
@@ -40,17 +41,14 @@ namespace BurcatProtocol
             {
                 BurcatCache.AddToCache(objectType);
                 foreach (BurcatField field in fields) reference.SetBurcatField(field);
-                if (reference.Identifier != Guid.Empty) reference.Identifier = objectID;
+
+                if (reference.Identifier != Guid.Empty)
+                {
+                    reference.Identifier = objectID;
+                    reference.Revision = revisionID;
+                }
             }
             return reference;
-        }
-
-        public virtual BurcatException? UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field)
-        {
-            IBurcatObject? objectBDP = objectID is Guid oID ? GetObject(streamID, objectType, oID) : null;
-
-            BurcatCache.AddToCache(objectType);
-            return BurcatCache.SetField(objectType, objectBDP, field, true);
         }
 
         public virtual ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
@@ -59,9 +57,10 @@ namespace BurcatProtocol
             return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
         }
 
+        public abstract Guid GetRevision(Guid? streamID, Type objectType, Guid objectID);
         public abstract IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);
 
-        public abstract BurcatException? CreateObject(Guid? streamID, IBurcatObject objectBDP);
-        public abstract BurcatException? DestroyObject(Guid? streamID, Type objectType, Guid objectID);
+        public abstract BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested);
+        public abstract BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP);
     }
 }

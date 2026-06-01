@@ -68,8 +68,11 @@ namespace BurcatProtocol.Collections
                 if (index >= 0) values[index] = value;
                 else
                 {
-                    keys.Insert(index, key);
-                    values.Insert(index, value);
+                    if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
+                    int insertIndex = ~index;
+                    keys.Insert(insertIndex, key);
+                    values.Insert(insertIndex, value);
                 }
             }
         }
@@ -80,8 +83,11 @@ namespace BurcatProtocol.Collections
             if (index >= 0) throw new ArgumentException("Key already exists");
             else
             {
-                keys.Insert(index, key);
-                values.Insert(index, value);
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
+                int insertIndex = ~index;
+                keys.Insert(insertIndex, key);
+                values.Insert(insertIndex, value);
             }
         }
 
@@ -93,6 +99,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 keys.RemoveAt(index);
                 values.RemoveAt(index);
                 return true;
@@ -118,6 +126,8 @@ namespace BurcatProtocol.Collections
 
         public void Clear()
         {
+            if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
             keys.Clear();
             values.Clear();
         }
@@ -141,6 +151,8 @@ namespace BurcatProtocol.Collections
             if (index < 0) return false;
             else
             {
+                if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
+
                 keys.RemoveAt(index);
                 values.RemoveAt(index);
                 return true;
@@ -153,7 +165,7 @@ namespace BurcatProtocol.Collections
                 yield return new KeyValuePair<TK, TV>(keys[i], values[i]);
         }
 
-        private int IndexOfKey(TK key) => Comparer is IComparer<TK> comparer ? keys.BinarySearch(key, comparer) : keys.BinarySearch(key);
+        private int IndexOfKey(TK key) => Comparer is IComparer<TK> comparer ? keys.BinarySearch(0, Count, key, comparer) : keys.BinarySearch(0, Count, key, Comparer<TK>.Default);
 
         IEnumerable<TK> IReadOnlyDictionary<TK, TV>.Keys => Keys;
         IEnumerable<TV> IReadOnlyDictionary<TK, TV>.Values => Values;

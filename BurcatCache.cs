@@ -130,7 +130,6 @@ namespace BurcatProtocol
                     if (result.SuccessfulExecution) return result.Value;
                 }
 
-                BurcatList<string> failedMessages = [];
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryInvoke(null, parameters, false, out IEnumerable<string> _);

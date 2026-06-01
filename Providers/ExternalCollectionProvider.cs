@@ -22,13 +22,28 @@ namespace BurcatProtocol.Providers
         public bool Remove(IExternalProvider item) => Providers.Remove(item);
         public IEnumerator<IExternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
-        public async Task<IBurcatObject?> GetObject(Guid? streamID, Type type, Guid objectID, CancellationToken token)
+        public async Task<Guid> GetRevision(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
 
-                IBurcatObject? result = await provider.GetObject(streamID, type, objectID, token);
+                Guid result = await provider.GetRevision(streamID, objectType, objectID, token);
+                if (result != Guid.Empty) return result;
+
+                token.ThrowIfCancellationRequested();
+            }
+
+            token.ThrowIfCancellationRequested();
+            return Guid.Empty;
+        }
+        public async Task<IBurcatObject?> GetObject(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
+        {
+            foreach (IExternalProvider provider in Providers)
+            {
+                token.ThrowIfCancellationRequested();
+
+                IBurcatObject? result = await provider.GetObject(streamID, objectType, objectID, token);
                 if (result is not null) return result;
 
                 token.ThrowIfCancellationRequested();
@@ -38,36 +53,24 @@ namespace BurcatProtocol.Providers
             return null;
         }
 
-        public async Task<BurcatException?> CreateObject(Guid? streamID, IBurcatObject objectBDP, CancellationToken token)
+        public async Task<BurcatException?> CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
-                if (await provider.CreateObject(streamID, objectBDP, token) is BurcatException exception)
+                if (await provider.CoupleCache(streamID, objectBDP, explicitelyRequested, token) is BurcatException exception)
                     return exception;
             }
 
             token.ThrowIfCancellationRequested();
             return null;
         }
-        public async Task<BurcatException?> UpdateObject(Guid? streamID, Type objectType, Guid? objectID, BurcatField field, CancellationToken token)
+        public async Task<BurcatException?> DecoupleCache(Guid? streamID, IBurcatObject objectBDP, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
-                if (await provider.UpdateObject(streamID, objectType, objectID, field, token) is BurcatException exception)
-                    return exception;
-            }
-
-            token.ThrowIfCancellationRequested();
-            return null;
-        }
-        public async Task<BurcatException?> DestroyObject(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
-        {
-            foreach (IExternalProvider provider in Providers)
-            {
-                token.ThrowIfCancellationRequested();
-                if (await provider.DestroyObject(streamID, objectType, objectID, token) is BurcatException exception)
+                if (await provider.DecoupleCache(streamID, objectBDP, token) is BurcatException exception)
                     return exception;
             }
 
@@ -77,18 +80,19 @@ namespace BurcatProtocol.Providers
 
         public async Task<ActionResult> ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
         {
+            ActionResult result = ActionResult.Unsuccessful;
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
 
-                ActionResult result = await provider.ExecuteAction(streamID, objectType, objectBDP, action, parameters, token);
-                if (result.SuccessfulExecution) return result;
+                result = await provider.ExecuteAction(streamID, objectType, objectBDP, action, parameters, token);
+                if (result.Exception is not null) return result;
 
                 token.ThrowIfCancellationRequested();
             }
 
             token.ThrowIfCancellationRequested();
-            return ActionResult.Unsuccessful;
+            return result;
         }
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

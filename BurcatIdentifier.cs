@@ -6,6 +6,8 @@ namespace BurcatProtocol
     public readonly struct BurcatIdentifier<T> : IBurcatObject, IEquatable<BurcatIdentifier<T>> where T : IBurcatObject
     {
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+
         public Guid Value { get; }
 
         public BurcatIdentifier(Guid value) { Value = value; }
@@ -32,7 +34,7 @@ namespace BurcatProtocol
         IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => BurcatTranslator.ObjectsTranslate([new BurcatType(typeof(T), false), Value]);
 
         public static bool operator ==(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => i1 is null && i2 is null || (i1 is not null && i2 is not null && i1.Value.Value == i2.Value.Value);
-        public static bool operator !=(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => !(i1 != i2);
+        public static bool operator !=(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => !(i1 == i2);
 
         public static implicit operator BurcatIdentifier<T>(T value) => new(value);
         public static explicit operator Guid(BurcatIdentifier<T> identifier) => identifier.Value;
