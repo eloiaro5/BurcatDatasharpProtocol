@@ -11,6 +11,9 @@ using System.Text;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Provides cached dynamic conversion helpers used by protocol construction, field assignment, and action invocation.
+    /// </summary>
     public static class Transformable
     {
         private static ConcurrentDictionary<Transform, byte> Transforms { get; } = [];
@@ -69,6 +72,14 @@ namespace BurcatProtocol
             return typed;
         }
 
+        /// <summary>
+        /// Tries to convert a value from a declared source type to a target type.
+        /// </summary>
+        /// <param name="sourceType">The declared source type.</param>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="targetType">The target type.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast(Type sourceType, object value, Type targetType, [MaybeNullWhen(false)] out object result)
         {
             if (!sourceType.IsAssignableFrom(value.GetType())) throw new ArgumentException($"The specified value is not of type '{sourceType.Name}'.", nameof(sourceType));
@@ -91,6 +102,15 @@ namespace BurcatProtocol
                 }
             }
         }
+
+        /// <summary>
+        /// Tries to convert a value from one static type to another.
+        /// </summary>
+        /// <typeparam name="F">The source type.</typeparam>
+        /// <typeparam name="T">The target type.</typeparam>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast<F, T>(F value, [MaybeNullWhen(false)] out T result) where F : notnull
         {
             if (TryDynamicCast(typeof(F), value, typeof(T), out object? r) && r is T rt)
@@ -104,6 +124,14 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to convert a value from its runtime type to a target type.
+        /// </summary>
+        /// <typeparam name="T">The target type.</typeparam>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast<T>(object value, [MaybeNullWhen(false)] out T result)
         {
             if (TryDynamicCast(value.GetType(), value, typeof(T), out object? r) && r is T rt)
@@ -117,6 +145,14 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to convert a nullable value to a target type.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="targetType">The target type.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast(object? value, Type targetType, out object? result)
         {
             if (value is null && MightBeNull(targetType))
@@ -131,6 +167,14 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to convert a value to the type and nullability represented by a field.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target field metadata.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast(object? value, FieldInfo info, out object? result)
         {
             if (value is null)
@@ -146,6 +190,13 @@ namespace BurcatProtocol
                 }
             else return TryDynamicCast(value.GetType(), value, info.FieldType, out result);
         }
+        /// <summary>
+        /// Tries to convert a value to the type and nullability represented by a property.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target property metadata.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast(object? value, PropertyInfo info, out object? result)
         {
             if (value is null)
@@ -161,6 +212,13 @@ namespace BurcatProtocol
                 }
             else return TryDynamicCast(value.GetType(), value, info.PropertyType, out result);
         }
+        /// <summary>
+        /// Tries to convert a value to the type and nullability represented by a parameter.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target parameter metadata.</param>
+        /// <param name="result">The converted value when successful.</param>
+        /// <returns><see langword="true"/> when conversion succeeds; otherwise, <see langword="false"/>.</returns>
         public static bool TryDynamicCast(object? value, ParameterInfo info, out object? result)
         {
             if (value is null)
@@ -176,42 +234,100 @@ namespace BurcatProtocol
                 }
             else return TryDynamicCast(value.GetType(), value, info.ParameterType, out result);
         }
+        /// <summary>
+        /// Converts a value from a declared source type to a target type.
+        /// </summary>
+        /// <param name="originType">The declared source type.</param>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="targetType">The target type.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static object DynamicCast(Type originType, object value, Type targetType)
         {
             if (TryDynamicCast(originType, value, targetType, out object? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a nullable value to a target type.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="targetType">The target type.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static object? DynamicCast(object? value, Type targetType)
         {
             if (TryDynamicCast(value, targetType, out object? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a value to the type and nullability represented by a field.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target field metadata.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static object? DynamicCast(object? value, FieldInfo info)
         {
             if (TryDynamicCast(value, info, out object? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a value to the type and nullability represented by a property.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target property metadata.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static object? DynamicCast(object? value, PropertyInfo info)
         {
             if (TryDynamicCast(value, info, out object? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a value to the type and nullability represented by a parameter.
+        /// </summary>
+        /// <param name="value">The value to convert.</param>
+        /// <param name="info">The target parameter metadata.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static object? DynamicCast(object? value, ParameterInfo info)
         {
             if (TryDynamicCast(value, info, out object? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a value from one static type to another.
+        /// </summary>
+        /// <typeparam name="F">The source type.</typeparam>
+        /// <typeparam name="T">The target type.</typeparam>
+        /// <param name="value">The value to convert.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static T DynamicCast<F, T>(F value) where F : notnull
         {
             if (TryDynamicCast<F, T>(value, out T? result)) return result;
             else throw new InvalidCastException();
         }
+        /// <summary>
+        /// Converts a value from its runtime type to a target type.
+        /// </summary>
+        /// <typeparam name="T">The target type.</typeparam>
+        /// <param name="value">The value to convert.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="InvalidCastException">Thrown when conversion is not possible.</exception>
         public static T DynamicCast<T>(object value)
         {
             if (TryDynamicCast<T>(value, out T? result)) return result;
             else throw new InvalidCastException();
         }
 
+        /// <summary>
+        /// Copies fields and properties with matching names between compatible base and derived objects.
+        /// </summary>
+        /// <param name="source">The object to copy values from.</param>
+        /// <param name="target">The object to copy values to.</param>
+        /// <param name="bindingFlags">The binding flags used to discover members.</param>
+        /// <returns><see langword="true"/> when the objects are related by inheritance; otherwise, <see langword="false"/>.</returns>
         public static bool BaseCopy(object source, object target, BindingFlags bindingFlags)
         {
             Type tSource = source.GetType(), tTarget = target.GetType();
@@ -232,24 +348,67 @@ namespace BurcatProtocol
             }
             else return false;
         }
+        /// <summary>
+        /// Copies public instance fields and properties between compatible base and derived objects.
+        /// </summary>
+        /// <param name="source">The object to copy values from.</param>
+        /// <param name="target">The object to copy values to.</param>
+        /// <returns><see langword="true"/> when the objects are related by inheritance; otherwise, <see langword="false"/>.</returns>
         public static bool BaseCopy(object source, object target) => BaseCopy(source, target, BindingFlags.Instance | BindingFlags.Public);
 
+        /// <summary>
+        /// Determines whether a type may contain null.
+        /// </summary>
+        /// <param name="type">The type to inspect.</param>
+        /// <returns><see langword="true"/> when the type may be null; otherwise, <see langword="false"/>.</returns>
         public static bool MightBeNull(this Type type) => !type.IsValueType || Nullable.GetUnderlyingType(type) != null;
+
+        /// <summary>
+        /// Determines whether a field permits null values.
+        /// </summary>
+        /// <param name="info">The field metadata.</param>
+        /// <returns><see langword="true"/> when the field permits null; otherwise, <see langword="false"/>.</returns>
         public static bool CanBeNull(this FieldInfo info) => new NullabilityInfoContext().Create(info).ReadState == NullabilityState.Nullable;
+
+        /// <summary>
+        /// Determines whether a property permits null values.
+        /// </summary>
+        /// <param name="info">The property metadata.</param>
+        /// <returns><see langword="true"/> when the property permits null; otherwise, <see langword="false"/>.</returns>
         public static bool CanBeNull(this PropertyInfo info) => new NullabilityInfoContext().Create(info).ReadState == NullabilityState.Nullable;
+
+        /// <summary>
+        /// Determines whether a parameter permits null values.
+        /// </summary>
+        /// <param name="info">The parameter metadata.</param>
+        /// <returns><see langword="true"/> when the parameter permits null; otherwise, <see langword="false"/>.</returns>
         public static bool CanBeNull(this ParameterInfo info) => new NullabilityInfoContext().Create(info).ReadState == NullabilityState.Nullable;
 
+        /// <summary>
+        /// Gets the non-nullable form of a nullable value type.
+        /// </summary>
+        /// <param name="type">The type to convert.</param>
+        /// <returns>The non-nullable type when applicable; otherwise, the original type.</returns>
         public static Type MakeNonNullable(this Type type)
         {
             if (MightBeNull(type) && Nullable.GetUnderlyingType(type) is Type underlying) return underlying;
             else return type;
         }
+
+        /// <summary>
+        /// Gets the nullable form of a value type.
+        /// </summary>
+        /// <param name="type">The type to convert.</param>
+        /// <returns>The nullable type when applicable; otherwise, the original type.</returns>
         public static Type MakeNullable(this Type type)
         {
             if (type.IsValueType && Nullable.GetUnderlyingType(type) == null) return typeof(Nullable<>).MakeGenericType(type);
             else return type;
         }
 
+        /// <summary>
+        /// Identifies how a cached transformation is performed.
+        /// </summary>
         private enum TransformType
         {
             None,
@@ -257,6 +416,9 @@ namespace BurcatProtocol
             Function
         }
 
+        /// <summary>
+        /// Represents a cached conversion between two CLR type keys.
+        /// </summary>
         private readonly struct Transform : IComparable<Transform>
         {
             private static MethodInfo Converter { get; } = typeof(Transformable).GetMethod(nameof(DynamicCast), [typeof(object), typeof(Type)])!;
@@ -290,10 +452,24 @@ namespace BurcatProtocol
                 return Expression.Lambda<Func<object, object>>(Expression.Convert(call, typeof(object)), arg).Compile();
             }
 
+            /// <summary>
+            /// Gets the source type key.
+            /// </summary>
             public GuidList From { get; }
+
+            /// <summary>
+            /// Gets the target type key.
+            /// </summary>
             public GuidList To { get; }
+
+            /// <summary>
+            /// Gets the kind of cached transformation.
+            /// </summary>
             public TransformType TransformType { get; }
 
+            /// <summary>
+            /// Gets the compiled transformation function.
+            /// </summary>
             public Func<object, object>? TransformFunction { get; }
 
             public Transform(Type from, Type to, TransformType transformType) { From = GuidList.FromType(from); To = GuidList.FromType(to); TransformType = transformType; }

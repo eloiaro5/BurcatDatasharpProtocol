@@ -7,21 +7,98 @@ using System.Reflection;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Manages <see cref="IBurcatObject"/> instances inside the current process or storage boundary.
+    /// </summary>
+    /// <remarks>
+    /// Internal providers can construct objects, resolve object revisions and references,
+    /// add or update cached objects, delete cached objects, and execute actions on them.
+    /// The optional <c>streamID</c> identifies the permission or communication session
+    /// that requested the operation; <see langword="null"/> means the operation was
+    /// requested internally.
+    /// </remarks>
     public interface IInternalProvider
     {
+        /// <summary>
+        /// Constructs a Burcat object, or returns <see langword="null"/> for a null object value.
+        /// </summary>
+        /// <param name="streamID">
+        /// The optional permission or communication session that requested construction.
+        /// </param>
+        /// <param name="objectType">The CLR type to construct.</param>
+        /// <param name="objectID">The provider reference to assign to the constructed object.</param>
+        /// <param name="revisionID">The revision to assign to the constructed object.</param>
+        /// <param name="parameters">The protocol values used as constructor arguments.</param>
+        /// <param name="fields">The protocol fields to apply after construction.</param>
+        /// <returns>The constructed nullable object, or <see langword="null"/> when no object can be constructed.</returns>
         IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields);
 
+        /// <summary>
+        /// Gets the revision of an object reference.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session that requested the revision.</param>
+        /// <param name="objectType">The CLR type of the referenced object.</param>
+        /// <param name="objectID">The provider reference of the requested object.</param>
+        /// <returns>
+        /// The object's current revision, or <see cref="Guid.Empty"/> when the reference
+        /// is unknown or has no available revision.
+        /// </returns>
         Guid GetRevision(Guid? streamID, Type objectType, Guid objectID);
+
+        /// <summary>
+        /// Gets the latest available object for a reference.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session that requested the object.</param>
+        /// <param name="objectType">The CLR type of the referenced object.</param>
+        /// <param name="objectID">The provider reference of the requested object.</param>
+        /// <returns>The referenced object, or <see langword="null"/> when it is not available.</returns>
         IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);
 
+        /// <summary>
+        /// Tries to add or update an object in the provider's cache or backing store.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session that requested the operation.</param>
+        /// <param name="objectBDP">The object to add or update.</param>
+        /// <param name="explicitelyRequested">
+        /// <see langword="true"/> when the operation was explicitly requested by the caller;
+        /// <see langword="false"/> when it is part of protocol synchronization.
+        /// </param>
+        /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
         BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested);
+
+        /// <summary>
+        /// Tries to delete an object from the provider's cache or backing store.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session that requested the operation.</param>
+        /// <param name="objectBDP">The object to remove.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
         BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP);
 
+        /// <summary>
+        /// Executes an action on an object or type and returns the action result.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session that requested the action.</param>
+        /// <param name="objectType">The CLR type that declares or receives the action.</param>
+        /// <param name="objectBDP">
+        /// The target object for instance actions, or <see langword="null"/> for static or type-level actions.
+        /// </param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The CLR parameter values to translate and pass to the action.</param>
+        /// <returns>The result of the action, including any exception produced by its execution.</returns>
         ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters);
     }
 
+    /// <summary>
+    /// Provides default construction and action execution behavior for internal providers.
+    /// </summary>
+    /// <remarks>
+    /// Derived providers supply object lookup and persistence behavior while this base
+    /// class handles generic Burcat type parameters, constructor invocation, field
+    /// application, identity assignment, and action dispatch through <see cref="BurcatCache"/>.
+    /// </remarks>
     public abstract class InternalProvider : IInternalProvider
     {
+        /// <inheritdoc/>
         public virtual IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields)
         {
             LinkedList<Type> genericTypes = [];
@@ -39,8 +116,7 @@ namespace BurcatProtocol
             IBurcatObject? reference = BurcatCache.Construct(objectType, parameters);
             if (reference is not null)
             {
-                BurcatCache.AddToCache(objectType);
-                foreach (BurcatField field in fields) reference.SetBurcatField(field);
+                reference.SetBurcatFields(fields);
 
                 if (reference.Identifier != Guid.Empty)
                 {
@@ -51,16 +127,23 @@ namespace BurcatProtocol
             return reference;
         }
 
+        /// <inheritdoc/>
         public virtual ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
             BurcatCache.AddToCache(objectType);
             return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
         }
 
+        /// <inheritdoc/>
         public abstract Guid GetRevision(Guid? streamID, Type objectType, Guid objectID);
+
+        /// <inheritdoc/>
         public abstract IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);
 
+        /// <inheritdoc/>
         public abstract BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested);
+
+        /// <inheritdoc/>
         public abstract BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP);
     }
 }

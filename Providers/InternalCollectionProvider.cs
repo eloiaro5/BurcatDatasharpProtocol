@@ -5,23 +5,49 @@ using System.Text;
 
 namespace BurcatProtocol.Providers
 {
+    /// <summary>
+    /// Internal provider that fans operations out across a collection of internal providers.
+    /// </summary>
     public sealed class InternalCollectionProvider : InternalProvider, ICollection<IInternalProvider>, IInternalProvider
     {
         private LinkedList<IInternalProvider> Providers { get; } = new();
 
+        /// <summary>
+        /// Initializes an empty internal provider collection.
+        /// </summary>
         public InternalCollectionProvider() { Providers = []; }
+
+        /// <summary>
+        /// Initializes an internal provider collection.
+        /// </summary>
+        /// <param name="providers">The providers to include.</param>
         public InternalCollectionProvider(IEnumerable<IInternalProvider> providers) { Providers = new(providers); }
 
+        /// <inheritdoc/>
         public int Count => Providers.Count;
+
+        /// <inheritdoc/>
         public bool IsReadOnly => false;
 
+        /// <inheritdoc/>
         public void Add(IInternalProvider item) => Providers.AddLast(item);
+
+        /// <inheritdoc/>
         public void Clear() => Providers.Clear();
+
+        /// <inheritdoc/>
         public bool Contains(IInternalProvider item) => Providers.Contains(item);
+
+        /// <inheritdoc/>
         public void CopyTo(IInternalProvider[] array, int arrayIndex) => Providers.CopyTo(array, arrayIndex);
+
+        /// <inheritdoc/>
         public bool Remove(IInternalProvider item) => Providers.Remove(item);
+
+        /// <inheritdoc/>
         public IEnumerator<IInternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
+        /// <inheritdoc/>
         public override Guid GetRevision(Guid? streamID, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)
@@ -33,6 +59,7 @@ namespace BurcatProtocol.Providers
             return Guid.Empty;
         }
 
+        /// <inheritdoc/>
         public override IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)
@@ -44,6 +71,7 @@ namespace BurcatProtocol.Providers
             return null;
         }
 
+        /// <inheritdoc/>
         public override BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested)
         {
             foreach (IInternalProvider provider in Providers)
@@ -52,6 +80,8 @@ namespace BurcatProtocol.Providers
 
             return null;
         }
+
+        /// <inheritdoc/>
         public override BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP)
         {
             foreach (IInternalProvider provider in Providers)
@@ -61,6 +91,7 @@ namespace BurcatProtocol.Providers
             return null;
         }
 
+        /// <inheritdoc/>
         public override ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
             ActionResult result = ActionResult.Unsuccessful;
@@ -73,6 +104,7 @@ namespace BurcatProtocol.Providers
             return result;
         }
 
+        /// <inheritdoc/>
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

@@ -4,9 +4,23 @@ using System.Runtime.InteropServices;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Represents an ordered list of GUIDs used as a composite cache key.
+    /// </summary>
     public class GuidList : IComparable<GuidList>, IEnumerable<Guid>
     {
+        /// <summary>
+        /// Builds a composite GUID key from a CLR type.
+        /// </summary>
+        /// <param name="type">The type to represent.</param>
+        /// <returns>The composite GUID key.</returns>
         public static GuidList FromType(Type type) => FromTypes([type]);
+
+        /// <summary>
+        /// Builds a composite GUID key from several CLR types.
+        /// </summary>
+        /// <param name="types">The types to represent.</param>
+        /// <returns>The composite GUID key.</returns>
         public static GuidList FromTypes(IEnumerable<Type> types)
         {
             LinkedList<Guid> guids = [];
@@ -42,6 +56,9 @@ namespace BurcatProtocol
             else yield return type.GUID;
         }
 
+        /// <summary>
+        /// Gets an empty composite GUID key.
+        /// </summary>
         public static GuidList Empty { get; } = new();
 
         private readonly Guid[] guids;
@@ -49,9 +66,22 @@ namespace BurcatProtocol
 
         private GuidList() { guids = []; hashCode = 0; }
 
+        /// <summary>
+        /// Initializes a composite key with one GUID.
+        /// </summary>
+        /// <param name="guid">The GUID value.</param>
         public GuidList(Guid guid) : this([guid]) { }
+
+        /// <summary>
+        /// Initializes a composite key from GUID values.
+        /// </summary>
+        /// <param name="guids">The GUID values.</param>
         public GuidList(Guid[] guids) { this.guids = guids; hashCode = ComputeHashCode(guids); }
 
+        /// <summary>
+        /// Initializes a composite key from an object's runtime type.
+        /// </summary>
+        /// <param name="obj">The object whose runtime type is represented.</param>
         public GuidList(object obj)
         {
             LinkedList<Guid> guids = [];
@@ -63,6 +93,7 @@ namespace BurcatProtocol
             hashCode = ComputeHashCode(this.guids);
         }
 
+        /// <inheritdoc/>
         public override bool Equals(object? obj)
         {
             if (obj is null) return false;
@@ -70,8 +101,11 @@ namespace BurcatProtocol
             else if (obj is GuidList guidList) return CompareTo(guidList) == 0;
             else return false;
         }
+
+        /// <inheritdoc/>
         public override int GetHashCode() => hashCode;
 
+        /// <inheritdoc/>
         public int CompareTo(GuidList? other)
         {
             if (other is null) return 1;
@@ -90,11 +124,14 @@ namespace BurcatProtocol
             }
         }
 
+        /// <inheritdoc/>
         public IEnumerator<Guid> GetEnumerator()
         {
             foreach (Guid guid in guids)
                 yield return guid;
         }
+
+        /// <inheritdoc/>
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }

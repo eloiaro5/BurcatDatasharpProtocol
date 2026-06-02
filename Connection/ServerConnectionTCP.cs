@@ -12,16 +12,34 @@ using System.Text;
 
 namespace BurcatProtocol.Connection
 {
+    /// <summary>
+    /// Base TCP server connection that accepts SSL-authenticated Burcat client streams.
+    /// </summary>
     public abstract class ServerConnectionTCP : IDisposable
     {
         private TcpListener Server { get; }
         private ConcurrentQueue<Stream> Streams { get; set; } = [];
 
+        /// <summary>
+        /// Gets the SSL server authentication options used for accepted clients.
+        /// </summary>
         protected abstract SslServerAuthenticationOptions SslOptions { get; }
 
+        /// <summary>
+        /// Initializes a TCP server connection.
+        /// </summary>
+        /// <param name="ip">The local IP address to bind.</param>
+        /// <param name="port">The local port to bind.</param>
         public ServerConnectionTCP(IPAddress ip, int port) { Server = new(ip, port); }
 
+        /// <summary>
+        /// Starts listening for clients.
+        /// </summary>
         public void Start() => Server.Start();
+
+        /// <summary>
+        /// Stops listening and closes accepted streams.
+        /// </summary>
         public void Stop()
         {
             ConcurrentQueue<Stream> current = Streams;
@@ -31,6 +49,11 @@ namespace BurcatProtocol.Connection
             Server.Stop();
         }
 
+        /// <summary>
+        /// Accepts one client and authenticates an SSL stream.
+        /// </summary>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The authenticated client stream.</returns>
         public async Task<Stream> AcceptAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
@@ -50,10 +73,31 @@ namespace BurcatProtocol.Connection
             }
             else throw new InvalidOperationException("The server has denied the communication to the client's address");
         }
+
+        /// <summary>
+        /// Accepts one client and authenticates an SSL stream.
+        /// </summary>
+        /// <returns>The authenticated client stream.</returns>
         public async Task<Stream> AcceptAsync() => await AcceptAsync(CancellationToken.None);
+
+        /// <summary>
+        /// Accepts one client and authenticates an SSL stream.
+        /// </summary>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The authenticated client stream.</returns>
         public Stream Accept(CancellationToken token) => AcceptAsync(token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Accepts one client and authenticates an SSL stream.
+        /// </summary>
+        /// <returns>The authenticated client stream.</returns>
         public Stream Accept() => Accept(CancellationToken.None);
 
+        /// <summary>
+        /// Accepts clients continuously as an asynchronous stream.
+        /// </summary>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The accepted authenticated streams.</returns>
         public async IAsyncEnumerable<Stream> AcceptMultipleAsync([EnumeratorCancellation] CancellationToken token)
         {
             while (true)
@@ -62,21 +106,55 @@ namespace BurcatProtocol.Connection
                 token.ThrowIfCancellationRequested();
             }
         }
+
+        /// <summary>
+        /// Accepts clients continuously as an asynchronous stream.
+        /// </summary>
+        /// <returns>The accepted authenticated streams.</returns>
         public async IAsyncEnumerable<Stream> AcceptMultipleAsync()
         {
             await foreach (Stream stream in AcceptMultipleAsync(CancellationToken.None))
                 yield return stream;
         }
+
+        /// <summary>
+        /// Accepts clients continuously as a blocking enumerable.
+        /// </summary>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The accepted authenticated streams.</returns>
         public IEnumerable<Stream> AcceptMultiple(CancellationToken token) => AcceptMultipleAsync(token).ToBlockingEnumerable(token);
+
+        /// <summary>
+        /// Accepts clients continuously as a blocking enumerable.
+        /// </summary>
+        /// <returns>The accepted authenticated streams.</returns>
         public IEnumerable<Stream> AcceptMultiple() => AcceptMultiple(CancellationToken.None);
 
+        /// <summary>
+        /// Called immediately before waiting for a client.
+        /// </summary>
         protected virtual void StartsWaitingClient() { }
+
+        /// <summary>
+        /// Called after a client has been accepted.
+        /// </summary>
         protected virtual void StopsWaitingClient() { }
 
+        /// <summary>
+        /// Validates whether a client address may connect.
+        /// </summary>
+        /// <param name="address">The remote address.</param>
+        /// <returns><see langword="true"/> when the address is allowed; otherwise, <see langword="false"/>.</returns>
         protected virtual bool ValidateAddress(IPAddress address) => true;
 
+        /// <summary>
+        /// Wraps a raw stream in an SSL stream.
+        /// </summary>
+        /// <param name="stream">The raw stream to wrap.</param>
+        /// <returns>The SSL stream.</returns>
         protected virtual SslStream GetSslStream(Stream stream) => new(stream);
 
+        /// <inheritdoc/>
         public void Dispose() { Stop(); Server.Dispose(); GC.SuppressFinalize(this); }
     }
 }

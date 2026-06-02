@@ -9,3 +9,4 @@ C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtoc
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\refint\BurcatProtocol.dll
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.pdb
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\ref\BurcatProtocol.dll
+C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.sourcelink.json

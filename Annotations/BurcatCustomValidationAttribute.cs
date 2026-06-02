@@ -10,12 +10,22 @@ using System.Xml.Linq;
 
 namespace BurcatProtocol.Annotations
 {
+    /// <summary>
+    /// Validation attribute that delegates validation to a public static method.
+    /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Method | AttributeTargets.Parameter, AllowMultiple = true)]
     public sealed class BurcatCustomValidationAttribute : ValidationAttribute
     {
         private ParameterInfo ObjectInfo { get; }
         private Delegate Delegate { get; }
 
+        /// <summary>
+        /// Initializes a custom validation attribute.
+        /// </summary>
+        /// <param name="validatorType">The type that contains the validation method.</param>
+        /// <param name="validationMethod">The public static validation method name.</param>
+        /// <exception cref="InvalidOperationException">Thrown when the method signature is not supported.</exception>
+        /// <exception cref="NullReferenceException">Thrown when the method cannot be found.</exception>
         public BurcatCustomValidationAttribute([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)] Type validatorType, string validationMethod)
         {
             if (validatorType.GetMethod(validationMethod, BindingFlags.Public | BindingFlags.Static) is MethodInfo method)
@@ -35,6 +45,7 @@ namespace BurcatProtocol.Annotations
             else throw new NullReferenceException($"No static method {validationMethod} in {validatorType.Name} was found.");
         }
 
+        /// <inheritdoc/>
         public override bool IsValid(object? value)
         {
             if (Transformable.TryDynamicCast(value, ObjectInfo, out object? pValue))
@@ -45,6 +56,7 @@ namespace BurcatProtocol.Annotations
             else return false;
         }
 
+        /// <inheritdoc/>
         protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
         {
             if (Transformable.TryDynamicCast(value, ObjectInfo, out object? result)) return (ValidationResult?)Delegate.DynamicInvoke(result);
