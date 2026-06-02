@@ -9,57 +9,152 @@ using System.Text;
 
 namespace BurcatProtocol
 {
-    //Implement object version and action discoverability
+    /// <summary>
+    /// Communicates <see cref="IBurcatObject"/> instances between applications through Burcat protocol streams.
+    /// </summary>
+    /// <remarks>
+    /// This class manages supported Burcat classes and their identities, object sending,
+    /// object and revision requests, explicit cache coupling and decoupling, action
+    /// requests, received exchange processing, and stream purging after invalid data.
+    /// </remarks>
     public static class BurcatChat
     {
+        /// <summary>
+        /// Gets or sets the default timeout used when an operation is called without a cancellation token.
+        /// </summary>
         public static TimeSpan DefaultTimeOut { get; set; } = new(TimeSpan.TicksPerSecond * 5);
+
+        /// <summary>
+        /// Gets or sets whether operations on the same identified stream are serialized with a semaphore.
+        /// </summary>
         public static bool ControlAsyncAccess { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets whether generated protocol exceptions include CLR stack trace text.
+        /// </summary>
         public static bool IncludeStackTraceOnException { get; set; } = false;
 
+        /// <summary>
+        /// Tries to get the Burcat class identity for a CLR type.
+        /// </summary>
+        /// <param name="type">The CLR type to inspect.</param>
+        /// <param name="identity">The Burcat class identity when the type is supported.</param>
+        /// <returns><see langword="true"/> when an identity was found; otherwise, <see langword="false"/>.</returns>
         public static bool TryGetClassIdentity(Type type, out Guid identity)
         {
             if (type.GetCustomAttribute<BurcatIdentityAttribute>() is BurcatIdentityAttribute identityAttribute) { identity = identityAttribute.Identity; return true; }
             else if (BurcatTranslator.CanTranslate(type, out identity)) return true;
             else { identity = Guid.Empty; return false; }
         }
+
+        /// <summary>
+        /// Tries to get the Burcat class identity for a CLR type.
+        /// </summary>
+        /// <typeparam name="T">The CLR type to inspect.</typeparam>
+        /// <param name="identifier">The Burcat class identity when the type is supported.</param>
+        /// <returns><see langword="true"/> when an identity was found; otherwise, <see langword="false"/>.</returns>
         public static bool TryGetClassIdentity<T>(out Guid identifier) => TryGetClassIdentity(typeof(T), out identifier);
+
+        /// <summary>
+        /// Tries to get the Burcat class identity for an object's runtime type.
+        /// </summary>
+        /// <param name="objectBDP">The object whose runtime type is inspected.</param>
+        /// <param name="identifier">The Burcat class identity when the type is supported.</param>
+        /// <returns><see langword="true"/> when an identity was found; otherwise, <see langword="false"/>.</returns>
         public static bool TryGetClassIdentity(object objectBDP, out Guid identifier) => TryGetClassIdentity(objectBDP.GetType(), out identifier);
+
+        /// <summary>
+        /// Gets the Burcat class identity for a CLR type.
+        /// </summary>
+        /// <param name="type">The CLR type to inspect.</param>
+        /// <returns>The Burcat class identity.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the type has no Burcat identity or translator.</exception>
         public static Guid GetClassIdentity(Type type)
         {
             if (TryGetClassIdentity(type, out Guid identifier)) return identifier;
             else throw new InvalidOperationException($"To get the BDP class identity, a class needs to be a BDP object and implement {nameof(BurcatIdentityAttribute)}.");
         }
+
+        /// <summary>
+        /// Gets the Burcat class identity for a CLR type.
+        /// </summary>
+        /// <typeparam name="T">The CLR type to inspect.</typeparam>
+        /// <returns>The Burcat class identity.</returns>
         public static Guid GetClassIdentity<T>() => GetClassIdentity(typeof(T));
+
+        /// <summary>
+        /// Gets the Burcat class identity for an object's runtime type.
+        /// </summary>
+        /// <param name="objectBDP">The object whose runtime type is inspected.</param>
+        /// <returns>The Burcat class identity.</returns>
         public static Guid GetClassIdentity(object objectBDP) => GetClassIdentity(objectBDP.GetType());
 
         private static SortedDictionary<Guid, Type> AcceptedClasses { get; } = [];
+
+        /// <summary>
+        /// Registers a type as accepted by this application for protocol communication.
+        /// </summary>
+        /// <param name="type">The type to register.</param>
+        /// <returns><see langword="true"/> when the class was registered; otherwise, <see langword="false"/>.</returns>
         public static bool AcceptClass(Type type)
         {
             if (TryGetClassIdentity(type, out Guid identity)) return AcceptedClasses.TryAdd(identity, type);
             else return false;
         }
+
+        /// <summary>
+        /// Registers all Burcat-identifiable types from an assembly.
+        /// </summary>
+        /// <param name="assembly">The assembly to scan.</param>
         public static void AcceptClasses(Assembly assembly)
         {
             foreach (Type type in assembly.GetTypes())
                 AcceptClass(type);
         }
+
+        /// <summary>
+        /// Registers all Burcat-identifiable types from the assemblies loaded in the current application domain.
+        /// </summary>
         public static void AcceptClasses()
         {
             foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
                 AcceptClasses(assembly);
         }
 
+        /// <summary>
+        /// Determines whether a Burcat class identity is accepted by this application.
+        /// </summary>
+        /// <param name="identity">The Burcat class identity to test.</param>
+        /// <returns><see langword="true"/> when the identity is accepted; otherwise, <see langword="false"/>.</returns>
         public static bool AcceptsClass(Guid identity)
         {
             if (!AcceptedClasses.ContainsKey(GetClassIdentity<NothingChart>())) AcceptClasses(typeof(BurcatChat).Assembly);
             return AcceptedClasses.ContainsKey(identity);
         }
+
+        /// <summary>
+        /// Determines whether a CLR type is accepted by this application.
+        /// </summary>
+        /// <param name="type">The type to test.</param>
+        /// <returns><see langword="true"/> when the type is accepted; otherwise, <see langword="false"/>.</returns>
         public static bool AcceptsClass(Type type)
         {
             if (AcceptedClasses.TryGetValue(GetClassIdentity(type), out Type? accepted)) return accepted.IsAssignableFrom(type);
             else return false;
         }
+
+        /// <summary>
+        /// Determines whether a CLR type is accepted by this application.
+        /// </summary>
+        /// <typeparam name="T">The type to test.</typeparam>
+        /// <returns><see langword="true"/> when the type is accepted; otherwise, <see langword="false"/>.</returns>
         public static bool AcceptsClass<T>() => AcceptsClass(typeof(T));
+
+        /// <summary>
+        /// Determines whether all Burcat-identifiable types in an assembly are accepted by this application.
+        /// </summary>
+        /// <param name="assembly">The assembly to test.</param>
+        /// <returns><see langword="true"/> when all types are accepted; otherwise, <see langword="false"/>.</returns>
         public static bool AcceptsClasses(Assembly assembly)
         {
             foreach (Type type in assembly.GetTypes())
@@ -68,15 +163,39 @@ namespace BurcatProtocol
             return true;
         }
 
+        /// <summary>
+        /// Tries to get the CLR type registered for a Burcat class identity.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity to resolve.</param>
+        /// <param name="type">The registered CLR type when found.</param>
+        /// <returns><see langword="true"/> when the type was found; otherwise, <see langword="false"/>.</returns>
         public static bool TryGetType(Guid classID, [MaybeNullWhen(false)] out Type type) => AcceptedClasses.TryGetValue(classID, out type);
+
+        /// <summary>
+        /// Gets the CLR type registered for a Burcat class identity.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity to resolve.</param>
+        /// <returns>The registered CLR type.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when no type is registered for the identity.</exception>
         public static Type GetType(Guid classID)
         {
             if (TryGetType(classID, out Type? type)) return type;
             else throw new InvalidOperationException($"There's no type with the specified identifier.");
         }
+
+        /// <summary>
+        /// Gets the CLR types accepted by this application.
+        /// </summary>
+        /// <returns>The accepted CLR types.</returns>
         public static IEnumerable<Type> GetAcceptedClasses() => AcceptedClasses.Values;
 
         private static ConcurrentDictionary<Guid, SemaphoreSlim> Semaphores { get; } = [];
+
+        /// <summary>
+        /// Advances a stream until the next known protocol ending marker is found.
+        /// </summary>
+        /// <param name="stream">The identified stream to purge.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static async Task PurgeAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
             CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
@@ -113,8 +232,20 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+
+        /// <summary>
+        /// Advances a stream until the next known protocol ending marker is found.
+        /// </summary>
+        /// <param name="stream">The identified stream to purge.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static void Purge(IdentifiedStream stream, CancellationToken? token = null) => PurgeAsync(stream, token).GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Sends a Burcat instance through a stream.
+        /// </summary>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="instance">The instance metadata and value to send.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public async static Task SendAsync(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null)
         {
             try
@@ -142,10 +273,47 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+
+        /// <summary>
+        /// Sends a Burcat object through a stream.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="objectBDP">The object to send.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static Task SendAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, new(objectBDP), token);
+
+        /// <summary>
+        /// Sends a null Burcat object value for a type through a stream.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static Task SendAsync<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, new(typeof(T), null), token);
+
+        /// <summary>
+        /// Sends a Burcat instance through a stream.
+        /// </summary>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="instance">The instance metadata and value to send.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static void Send(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null) => SendAsync(stream, instance, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends a Burcat object through a stream.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="objectBDP">The object to send.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static void Send<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, objectBDP, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends a null Burcat object value for a type through a stream.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The destination stream.</param>
+        /// <param name="token">The optional cancellation token.</param>
         public static void Send<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync<T>(stream, token).GetAwaiter().GetResult();
 
         private static async Task<Guid> RelayRevisionRequestAsync(Guid? streamID, Guid classID, Guid objectID, bool ignoreInternal, CancellationToken? token)
@@ -163,9 +331,34 @@ namespace BurcatProtocol
 
             return version;
         }
+        /// <summary>
+        /// Resolves the current revision for an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
         public static Task<Guid> RelayRevisionRequestAsync(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(null, classID, objectID, ignoreInternal, token);
+
+        /// <summary>
+        /// Resolves the current revision for an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
         public static Guid RelayRevisionRequest(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Sends a revision request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The revision returned by the remote application.</returns>
         public static async Task<Guid> SendRevisionRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
         {
             try
@@ -214,6 +407,15 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+
+        /// <summary>
+        /// Sends a revision request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The revision returned by the remote application.</returns>
         public static Guid SendRevisionRequest(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null) => SendRevisionRequestAsync(stream, classID, objectID, token).GetAwaiter().GetResult();
 
         private static async Task<IBurcatObject?> RelayObjectRequestAsync(Guid? streamID, Guid classID, Guid objectID, bool ignoreInternal, CancellationToken? token)
@@ -231,13 +433,74 @@ namespace BurcatProtocol
 
             return reference;
         }
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static Task<IBurcatObject?> RelayObjectRequestAsync(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(null, classID, objectID, ignoreInternal, token);
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static async Task<T?> RelayObjectRequestAsync<T>(Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await RelayObjectRequestAsync(GetClassIdentity<T>(), objectID, ignoreInternal, token); return result; }
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="objectID">The typed object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static Task<T?> RelayObjectRequestAsync<T>(BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>((Guid)objectID, ignoreInternal, token);
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static IBurcatObject? RelayObjectRequest(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static T? RelayObjectRequest<T>(Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(objectID, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="objectID">The typed object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
         public static T? RelayObjectRequest<T>(BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static async Task<IBurcatObject?> SendObjectRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
         {
             try
@@ -279,10 +542,54 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static async Task<T?> SendObjectRequestAsync<T>(IdentifiedStream stream, Guid objectID, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await SendObjectRequestAsync(stream, GetClassIdentity<T>(), objectID, token); return result; }
+
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectID">The typed object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static Task<T?> SendObjectRequestAsync<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, (Guid)objectID, token);
+
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static IBurcatObject? SendObjectRequest(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null) => SendObjectRequestAsync(stream, classID, objectID, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static T? SendObjectRequest<T>(IdentifiedStream stream, Guid objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an object request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The expected object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectID">The typed object reference identity.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static T? SendObjectRequest<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
 
         private static async Task<BurcatException?> RelayCoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
@@ -298,9 +605,34 @@ namespace BurcatProtocol
             cancellation.ThrowIfCancellationRequested();
             return creationException;
         }
+        /// <summary>
+        /// Requests that the configured providers add or update an object in cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         public static Task<BurcatException?> RelayCoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(null, objectBDP, ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers add or update an object in cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         public static BurcatException? RelayCouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Sends an explicit cache add or update request to another application.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static async Task<BurcatException?> SendCoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
         {
             try
@@ -333,6 +665,15 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+
+        /// <summary>
+        /// Sends an explicit cache add or update request to another application.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static BurcatException? SendCouple<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(stream, objectBDP, token).GetAwaiter().GetResult();
 
         private static async Task<BurcatException?> RelayDecoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
@@ -348,9 +689,34 @@ namespace BurcatProtocol
             cancellation.ThrowIfCancellationRequested();
             return creationException;
         }
+        /// <summary>
+        /// Requests that the configured providers delete an object from cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         public static Task<BurcatException?> RelayDecoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(null, objectBDP, ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers delete an object from cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         public static BurcatException? RelayDecouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Sends an explicit cache delete request to another application.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static async Task<BurcatException?> SendDecoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
         {
             try
@@ -383,6 +749,15 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
+
+        /// <summary>
+        /// Sends an explicit cache delete request to another application.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static BurcatException? SendDecouple<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(stream, objectBDP, token).GetAwaiter().GetResult();
 
         private static async Task<ActionResult> RelayActionAsync(Guid? streamID, BurcatInstance instance, string action, object?[]? parameters, bool ignoreInternal, CancellationToken? token)
@@ -401,14 +776,84 @@ namespace BurcatProtocol
                 return result;
             }
         }
+        /// <summary>
+        /// Executes an action through the configured providers.
+        /// </summary>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static Task<ActionResult> RelayActionAsync(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(null, instance, action, parameters, ignoreInternal, token);
+
+        /// <summary>
+        /// Executes an instance action through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="objectBDP">The target object.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static Task<ActionResult> RelayActionAsync<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(objectBDP), action, parameters, ignoreInternal, token);
+
+        /// <summary>
+        /// Executes a type-level action through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static Task<ActionResult> RelayActionAsync<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(typeof(T), null), action, parameters, ignoreInternal, token);
+
+        /// <summary>
+        /// Executes an action through the configured providers.
+        /// </summary>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static ActionResult RelayAction(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Executes an instance action through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="objectBDP">The target object.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static ActionResult RelayAction<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(objectBDP), action, parameters, ignoreInternal, token);
+
+        /// <summary>
+        /// Executes a type-level action through the configured providers.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
         public static ActionResult RelayAction<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(typeof(T), null), action, parameters, ignoreInternal, token);
 
 
+        /// <summary>
+        /// Sends an action request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static async Task<ActionResult> SendActionAsync(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null)
         {
             IBurcatObject?[] burcatParameters = BurcatTranslator.ObjectsTranslate(parameters);
@@ -467,16 +912,81 @@ namespace BurcatProtocol
                 finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
             }
         }
+
+        /// <summary>
+        /// Sends an instance action request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The target object.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(objectBDP), action, parameters, token);
+
+        /// <summary>
+        /// Sends a type-level action request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(typeof(T), null), action, parameters, token);
+
+        /// <summary>
+        /// Sends an action request to another application through a stream.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static ActionResult SendAction(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null) => SendActionAsync(stream, instance, action, parameters, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an instance action request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The target object.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static ActionResult SendAction<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(objectBDP), action, parameters, token);
+
+        /// <summary>
+        /// Sends a type-level action request to another application through a stream.
+        /// </summary>
+        /// <typeparam name="T">The target object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result returned by the remote application.</returns>
         public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(typeof(T), null), action, parameters, token);
 
+        /// <summary>
+        /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
+        /// </summary>
         public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
+
+        /// <summary>
+        /// Gets or sets the provider used to forward object operations to an external source.
+        /// </summary>
         public static IExternalProvider? ExternalProvider { get; set; }
 
-        public static async Task<ExchangeResult> RecieveAsync(IdentifiedStream stream, CancellationToken? token)
+        /// <summary>
+        /// Receives and processes the next Burcat protocol exchange from a stream.
+        /// </summary>
+        /// <param name="stream">The source stream.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The result of the received exchange.</returns>
+        public static async Task<ExchangeResult> RecieveAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
             try
             {
@@ -699,9 +1209,13 @@ namespace BurcatProtocol
             }
             finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
         }
-        public static Task<ExchangeResult> RecieveAsync(IdentifiedStream stream) => RecieveAsync(stream, CancellationToken.None);
-        public static ExchangeResult Recieve(IdentifiedStream stream, CancellationToken? token) => RecieveAsync(stream, token).GetAwaiter().GetResult();
-        public static ExchangeResult Recieve(IdentifiedStream stream) => Recieve(stream, CancellationToken.None);
+        /// <summary>
+        /// Receives and processes the next Burcat protocol exchange from a stream.
+        /// </summary>
+        /// <param name="stream">The source stream.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The result of the received exchange.</returns>
+        public static ExchangeResult Recieve(IdentifiedStream stream, CancellationToken? token = null) => RecieveAsync(stream, token).GetAwaiter().GetResult();
 
         private static async Task SendObject(IdentifiedStream stream, BurcatInstance instance, CancellationToken token)
         {
@@ -954,7 +1468,7 @@ namespace BurcatProtocol
             Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
             BurcatField[] IBurcatObject.GetBurcatFields() => [];
-            bool IBurcatObject.SetBurcatField(BurcatField field) => false;
+            void IBurcatObject.SetBurcatFields(BurcatField[] fields) { }
             IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => [];
         }
         [BurcatIdentity("00000000-0000-0000-0000-000000000001")]

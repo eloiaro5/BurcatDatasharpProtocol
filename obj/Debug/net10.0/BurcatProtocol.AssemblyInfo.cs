@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a596490a981e02e9306b946a50541f72b3efa002")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d3699bc9742f52017f1ddf41f9a7fd57bc33b761")]
 [assembly: System.Reflection.AssemblyProductAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

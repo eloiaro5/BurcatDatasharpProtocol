@@ -3,16 +3,45 @@ using System.Text;
 
 namespace BurcatProtocol.Connection
 {
+    /// <summary>
+    /// Describes how many values a command argument accepts and whether it is required.
+    /// </summary>
     public enum ActionerKeySpecificity
     {
+        /// <summary>
+        /// The argument is required and accepts at least the configured number of values.
+        /// </summary>
         RequiredMinimum,
+
+        /// <summary>
+        /// The argument is required and accepts exactly the configured number of values.
+        /// </summary>
         RequiredExactly,
+
+        /// <summary>
+        /// The argument is required and accepts at most the configured number of values.
+        /// </summary>
         RequiredMaximum,
+
+        /// <summary>
+        /// The argument is optional and accepts at least the configured number of values.
+        /// </summary>
         OptionalMinimum,
+
+        /// <summary>
+        /// The argument is optional and accepts exactly the configured number of values.
+        /// </summary>
         OptionalExactly,
+
+        /// <summary>
+        /// The argument is optional and accepts at most the configured number of values.
+        /// </summary>
         OptionalMaximum
     }
 
+    /// <summary>
+    /// Parses command strings and dispatches argument handlers.
+    /// </summary>
     public static class QuestionProcessor
     {
         private static AsyncLocal<Dictionary<Guid, string>> Parameters { get; } = new() { Value = [] };
@@ -24,6 +53,11 @@ namespace BurcatProtocol.Connection
             return value;
         }
 
+        /// <summary>
+        /// Splits a command string into command enumerators while preserving quoted text.
+        /// </summary>
+        /// <param name="command">The command text to parse.</param>
+        /// <returns>The parsed command enumerators.</returns>
         public static IEnumerable<QuestionEnumerator> ParseCommand(string command)
         {
             StringBuilder commandSB = new(), valueSB = new();
@@ -76,6 +110,11 @@ namespace BurcatProtocol.Connection
             if (!string.IsNullOrWhiteSpace(commandSB.ToString())) yield return new(commandSB.ToString());
         }
 
+        /// <summary>
+        /// Parses command arguments and invokes matching argument actions.
+        /// </summary>
+        /// <param name="command">The command argument enumerator.</param>
+        /// <param name="actions">The argument handlers keyed by accepted argument names.</param>
         public static void ParseArguments(IEnumerator<string> command, Dictionary<QuestionArgumentKey, Action<IEnumerable<string>>> actions)
         {
             bool parameters = command.MoveNext();
@@ -133,15 +172,42 @@ namespace BurcatProtocol.Connection
         }
     }
 
+    /// <summary>
+    /// Describes a recognized command argument and its value-count requirements.
+    /// </summary>
     public class QuestionArgumentKey
     {
         private string[] Parameters { get; }
+
+        /// <summary>
+        /// Gets the configured argument value count.
+        /// </summary>
         public int ValueCount { get; }
+
+        /// <summary>
+        /// Gets the argument value-count specificity.
+        /// </summary>
         public ActionerKeySpecificity Specificity { get; }
 
+        /// <summary>
+        /// Initializes an argument key.
+        /// </summary>
+        /// <param name="parameters">The accepted argument names.</param>
+        /// <param name="valueCount">The configured value count.</param>
+        /// <param name="specificity">The value-count specificity.</param>
         public QuestionArgumentKey(string[] parameters, int valueCount, ActionerKeySpecificity specificity) { Parameters = parameters; ValueCount = valueCount; Specificity = specificity; }
+
+        /// <summary>
+        /// Initializes an optional argument key with no values.
+        /// </summary>
+        /// <param name="parameters">The accepted argument names.</param>
         public QuestionArgumentKey(string[] parameters) : this(parameters, 0, ActionerKeySpecificity.OptionalExactly) { }
 
+        /// <summary>
+        /// Determines whether an argument name matches this key.
+        /// </summary>
+        /// <param name="argument">The argument name.</param>
+        /// <returns><see langword="true"/> when the argument is accepted; otherwise, <see langword="false"/>.</returns>
         public bool ContainsParameter(string argument) => Parameters.Contains(argument);
     }
 }

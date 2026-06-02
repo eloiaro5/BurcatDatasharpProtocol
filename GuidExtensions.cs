@@ -5,8 +5,15 @@ using System.Text;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Provides GUID helpers used by the Burcat protocol.
+    /// </summary>
     public static class GuidExtensions
     {
+        /// <summary>
+        /// Generates a time-ordered GUID with random trailing bytes.
+        /// </summary>
+        /// <returns>A sequential GUID value.</returns>
         public static Guid GenerateSequential()
         {
             byte[] bytes = new byte[16];
@@ -30,8 +37,19 @@ namespace BurcatProtocol
 
             return new Guid(bytes);
         }
+
+        /// <summary>
+        /// Generates a random GUID from cryptographically secure random bytes.
+        /// </summary>
+        /// <returns>A random GUID value.</returns>
         public static Guid GenerateRandom() => new(RandomNumberGenerator.GetBytes(16));
 
+        /// <summary>
+        /// Adds a byte value to a GUID interpreted as a little-endian byte sequence.
+        /// </summary>
+        /// <param name="guid">The base GUID.</param>
+        /// <param name="value">The value to add.</param>
+        /// <returns>The resulting GUID.</returns>
         public static Guid Add(Guid guid, byte value)
         {
             int carry = value;

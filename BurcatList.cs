@@ -11,31 +11,68 @@ using System.Text;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Represents a protocol-aware list whose mutations update the Burcat revision when referenced.
+    /// </summary>
+    /// <typeparam name="T">The item type.</typeparam>
     [BurcatIdentity("00000000-0000-0000-0000-cbb4dedec0ec")]
     public sealed class BurcatList<T> : BurcatObject, IList<T>, IReadOnlyList<T>
     {
         [NotBurcatInvokable]
         private T[] values;
 
+        /// <inheritdoc/>
         public int Count { get; private set; }
+
+        /// <inheritdoc/>
         public bool IsReadOnly => false;
 
+        /// <summary>
+        /// Initializes a referenced list from values.
+        /// </summary>
+        /// <param name="identifier">The list identifier.</param>
+        /// <param name="values">The initial values.</param>
         public BurcatList(Guid identifier, IEnumerable<T> values) : base(identifier)
         {
             this.values = [.. values];
             Count = this.values.Length;
         }
+
+        /// <summary>
+        /// Initializes a referenced list with capacity.
+        /// </summary>
+        /// <param name="identifier">The list identifier.</param>
+        /// <param name="capacity">The initial capacity.</param>
         public BurcatList(Guid identifier, int capacity) : base(identifier) { values = new T[capacity]; }
+
+        /// <summary>
+        /// Initializes an empty referenced list.
+        /// </summary>
+        /// <param name="identifier">The list identifier.</param>
         public BurcatList(Guid identifier) : this(identifier, []) { }
 
+        /// <summary>
+        /// Initializes an unreferenced list from values.
+        /// </summary>
+        /// <param name="values">The initial values.</param>
         public BurcatList(IEnumerable<T> values) : base(Guid.Empty)
         {
             this.values = [.. values];
             Count = this.values.Length;
         }
+
+        /// <summary>
+        /// Initializes an unreferenced list with capacity.
+        /// </summary>
+        /// <param name="capacity">The initial capacity.</param>
         public BurcatList(int capacity) : base(Guid.Empty) { values = new T[capacity]; }
+
+        /// <summary>
+        /// Initializes an empty unreferenced list.
+        /// </summary>
         public BurcatList() : this([]) { }
 
+        /// <inheritdoc/>
         [NotBurcatInvokable]
         public T this[int index]
         {
@@ -55,6 +92,7 @@ namespace BurcatProtocol
             }
         }
 
+        /// <inheritdoc/>
         public void Add(T item)
         {
             if (Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
@@ -63,6 +101,7 @@ namespace BurcatProtocol
             values[Count++] = item;
         }
 
+        /// <inheritdoc/>
         public void Clear()
         {
             if (Count != 0 && Identifier != Guid.Empty) Revision = GuidExtensions.GenerateRandom();
@@ -71,22 +110,48 @@ namespace BurcatProtocol
             Count = 0;
         }
 
+        /// <inheritdoc/>
         public bool Contains(T item) => IndexOf(item) >= 0;
 
+        /// <inheritdoc/>
         public void CopyTo(T[] array, int arrayIndex) => Array.Copy(values, 0, array, arrayIndex, Count);
 
+        /// <summary>
+        /// Searches a sorted range of the list for an item.
+        /// </summary>
+        /// <param name="index">The starting index.</param>
+        /// <param name="count">The range length.</param>
+        /// <param name="item">The item to search for.</param>
+        /// <param name="comparer">The comparer to use.</param>
+        /// <returns>The item index, or a negative insertion index.</returns>
         public int BinarySearch(int index, int count, T item, IComparer<T> comparer) => Array.BinarySearch(values, index, count, item, comparer);
+
+        /// <summary>
+        /// Searches the list for an item using a comparer.
+        /// </summary>
+        /// <param name="item">The item to search for.</param>
+        /// <param name="comparer">The comparer to use.</param>
+        /// <returns>The item index, or a negative insertion index.</returns>
         public int BinarySearch(T item, IComparer<T> comparer) => BinarySearch(0, values.Length, item, comparer);
+
+        /// <summary>
+        /// Searches the list for an item using the default comparer.
+        /// </summary>
+        /// <param name="item">The item to search for.</param>
+        /// <returns>The item index, or a negative insertion index.</returns>
         public int BinarySearch(T item) => BinarySearch(item, Comparer<T>.Default);
 
+        /// <inheritdoc/>
         public IEnumerator<T> GetEnumerator()
         {
             for (int i = 0; i < Count; i++)
                 yield return values[i];
         }
 
+        /// <inheritdoc/>
         public int IndexOf(T item) => Array.IndexOf(values, item, 0, Count);
 
+        /// <inheritdoc/>
         public void Insert(int index, T item)
         {
             if (index < 0 || index > Count) throw new ArgumentOutOfRangeException(nameof(index));
@@ -101,6 +166,7 @@ namespace BurcatProtocol
             }
         }
 
+        /// <inheritdoc/>
         public bool Remove(T item)
         {
             int index = IndexOf(item);
@@ -114,6 +180,7 @@ namespace BurcatProtocol
             }
         }
 
+        /// <inheritdoc/>
         public void RemoveAt(int index)
         {
             if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
@@ -138,8 +205,10 @@ namespace BurcatProtocol
             }
         }
 
+        /// <inheritdoc/>
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
+        /// <inheritdoc/>
         public override BurcatField[] GetBurcatFields()
         {
             BurcatField[] fields = new BurcatField[Count];
@@ -148,24 +217,37 @@ namespace BurcatProtocol
             return fields;
 
         }
-        public override bool SetBurcatField(BurcatField field)
+
+        /// <inheritdoc/>
+        public override void SetBurcatFields(BurcatField[] fields)
         {
-            if (int.TryParse(field.Name, out int index))
+            foreach (BurcatField field in fields)
             {
-                if (field.Value is null) values[index] = default!;
-                else if (GetType().GetGenericArguments()[0].IsAssignableFrom(field.Value.GetType())) values[index] = (T)field.Value;
-                else if (field.Value is BurcatTranslation translation && BurcatTranslator.TryTranslate<T>(translation, out T? value)) values[index] = value;
-                else throw new InvalidCastException();
+                if (int.TryParse(field.Name, out int index))
+                {
+                    if (field.Value is null) values[index] = default!;
+                    else if (GetType().GetGenericArguments()[0].IsAssignableFrom(field.Value.GetType())) values[index] = (T)field.Value;
+                    else if (field.Value is BurcatTranslation translation && BurcatTranslator.TryTranslate<T>(translation, out T? value)) values[index] = value;
+                    else throw new InvalidCastException();
 
-                if (Count <= index) Count = index + 1;
+                    if (Count <= index) Count = index + 1;
+                }
             }
-            else return false;
-
-            return true;
         }
+
+        /// <inheritdoc/>
         public override object?[] GetBurcatConstructionValues() => [new BurcatType(typeof(T)), Identifier, Count];
 
+        /// <summary>
+        /// Converts an array to a Burcat list.
+        /// </summary>
+        /// <param name="array">The source array.</param>
         public static implicit operator BurcatList<T>(T[] array) => new([.. array]);
+
+        /// <summary>
+        /// Converts a Burcat list to an array.
+        /// </summary>
+        /// <param name="list">The source list.</param>
         public static implicit operator T[](BurcatList<T> list) { Array.Resize(ref list.values, list.Count); return list.values; }
     }
 }

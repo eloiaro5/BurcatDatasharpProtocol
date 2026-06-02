@@ -17,10 +17,30 @@ using static System.Collections.Specialized.BitVector32;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Caches reflected Burcat fields, properties, constructors, and methods for faster protocol execution.
+    /// </summary>
+    /// <remarks>
+    /// The cache stores compiled accessors and invokers used for object construction,
+    /// field extraction, field assignment, and action execution. It also validates
+    /// field values, method parameters, method results, and object state by using
+    /// <see cref="ValidationAttribute"/> metadata.
+    /// </remarks>
     public static class BurcatCache
     {
+        /// <summary>
+        /// Binding flags used to discover public Burcat fields and properties.
+        /// </summary>
         public const BindingFlags PublicFieldsFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.FlattenHierarchy;
+
+        /// <summary>
+        /// Binding flags used to discover public Burcat methods.
+        /// </summary>
         public const BindingFlags PublicMehodsFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.FlattenHierarchy;
+
+        /// <summary>
+        /// Binding flags used to discover public Burcat constructors.
+        /// </summary>
         public const BindingFlags PublicConstructorsFlags = BindingFlags.Public | BindingFlags.Instance;
 
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<ObjectField, byte>> Fields { get; } = [];
@@ -29,26 +49,67 @@ namespace BurcatProtocol
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<GenericMethod, byte>> GenericMethods { get; } = [];
         private static ConcurrentDictionary<MethodKey, ConcurrentDictionary<ObjectMethod, byte>> Methods { get; } = [];
 
+        /// <summary>
+        /// Adds a field to the cache for a Burcat object type.
+        /// </summary>
+        /// <param name="objectType">The type that owns or exposes the field.</param>
+        /// <param name="info">The field metadata to cache.</param>
+        /// <returns><see langword="true"/> when the field was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(Type objectType, FieldInfo info)
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectField, byte> fields = Fields.GetOrAdd(guid, []);
             return fields.TryAdd(new(info), 0);
         }
+
+        /// <summary>
+        /// Adds a field to the cache for a Burcat object's runtime type.
+        /// </summary>
+        /// <param name="objectBDP">The object whose runtime type owns or exposes the field.</param>
+        /// <param name="info">The field metadata to cache.</param>
+        /// <returns><see langword="true"/> when the field was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(IBurcatObject objectBDP, FieldInfo info) => AddToCache(objectBDP.GetType(), info);
+
+        /// <summary>
+        /// Adds a property to the cache for a Burcat object type.
+        /// </summary>
+        /// <param name="objectType">The type that owns or exposes the property.</param>
+        /// <param name="info">The property metadata to cache.</param>
+        /// <returns><see langword="true"/> when the property was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(Type objectType, PropertyInfo info)
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectField, byte> fields = Fields.GetOrAdd(guid, []);
             return fields.TryAdd(new(info), 0);
         }
+
+        /// <summary>
+        /// Adds a property to the cache for a Burcat object's runtime type.
+        /// </summary>
+        /// <param name="objectBDP">The object whose runtime type owns or exposes the property.</param>
+        /// <param name="info">The property metadata to cache.</param>
+        /// <returns><see langword="true"/> when the property was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(IBurcatObject objectBDP, PropertyInfo info) => AddToCache(objectBDP.GetType(), info);
+
+        /// <summary>
+        /// Adds a constructor to the cache for a Burcat object type.
+        /// </summary>
+        /// <param name="objectType">The type that owns the constructor.</param>
+        /// <param name="info">The constructor metadata to cache.</param>
+        /// <returns><see langword="true"/> when the constructor was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(Type objectType, ConstructorInfo info)
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectMethod, byte> constructors = Constructors.GetOrAdd(guid, []);
             return constructors.TryAdd(new(info), 0);
         }
+
+        /// <summary>
+        /// Adds a method to the cache for a Burcat object type.
+        /// </summary>
+        /// <param name="objectType">The type that owns or exposes the method.</param>
+        /// <param name="info">The method metadata to cache.</param>
+        /// <returns><see langword="true"/> when the method was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(Type objectType, MethodInfo info)
         {
             if (info.ContainsGenericParameters)
@@ -66,6 +127,14 @@ namespace BurcatProtocol
         }
 
         private static SortedSet<GuidList> InCache { get; } = [];
+
+        /// <summary>
+        /// Discovers and caches all public Burcat-invokable members for a type.
+        /// </summary>
+        /// <remarks>
+        /// Members marked with <see cref="NotBurcatInvokableAttribute"/> are ignored.
+        /// </remarks>
+        /// <param name="objectType">The type to scan and cache.</param>
         public static void AddToCache(Type objectType)
         {
             GuidList guid = GuidList.FromType(objectType);
@@ -79,14 +148,32 @@ namespace BurcatProtocol
                 InCache.Add(guid);
             }
         }
+
+        /// <summary>
+        /// Checks whether a type has already been scanned into the cache.
+        /// </summary>
+        /// <param name="objectType">The type to check.</param>
         public static void IsInCache(Type objectType) => InCache.Contains(GuidList.FromType(objectType));
 
+        /// <summary>
+        /// Gets the cached readable fields and properties for a Burcat object.
+        /// </summary>
+        /// <param name="objectBDP">The object whose field values are read.</param>
+        /// <returns>The readable protocol fields currently cached for the object's type.</returns>
         public static BurcatField[] GetFields(IBurcatObject objectBDP)
         {
             if (Fields.TryGetValue(new(objectBDP), out ConcurrentDictionary<ObjectField, byte>? fields)) return [.. fields.Keys.Where(f => f.GetFunction is not null).Select(f => new BurcatField(f.PublicName, BurcatTranslator.ObjectTranslate(f.GetFunction!(objectBDP))))];
             else return [];
         }
 
+        /// <summary>
+        /// Sets a cached field or property value on a Burcat object.
+        /// </summary>
+        /// <param name="objectType">The type that owns or exposes the field.</param>
+        /// <param name="objectBDP">The target object, or <see langword="null"/> for static fields.</param>
+        /// <param name="field">The protocol field name and value to apply.</param>
+        /// <param name="validate">Whether to validate the value before assigning it.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
         public static BurcatException? SetField(Type objectType, IBurcatObject? objectBDP, BurcatField field, bool validate = false)
         {
             LinkedList<ValidationResult> validations = [];
@@ -120,6 +207,13 @@ namespace BurcatProtocol
             else return new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} is not cached.");
         }
 
+        /// <summary>
+        /// Constructs a Burcat object from cached constructors and protocol parameters.
+        /// </summary>
+        /// <param name="objectType">The type to construct.</param>
+        /// <param name="parameters">The protocol constructor parameters.</param>
+        /// <returns>The constructed object, or <see langword="null"/> when the constructor returns a null value.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when no cached constructor can accept the provided parameters.</exception>
         public static IBurcatObject? Construct(Type objectType, IBurcatObject?[] parameters)
         {
             if (Constructors.TryGetValue(GuidList.FromType(objectType), out ConcurrentDictionary<ObjectMethod, byte>? constructors))
@@ -141,6 +235,14 @@ namespace BurcatProtocol
             else throw new InvalidOperationException($"There's no constructors avaliable in {objectType.Name}.");
         }
 
+        /// <summary>
+        /// Executes a cached method or action on a Burcat object type.
+        /// </summary>
+        /// <param name="objectType">The type that owns or exposes the action.</param>
+        /// <param name="objectBDP">The target object, or <see langword="null"/> for static actions.</param>
+        /// <param name="name">The action name.</param>
+        /// <param name="parameters">The protocol action parameters.</param>
+        /// <returns>The action result or the protocol exception produced while trying to execute it.</returns>
         public static ActionResult ExecuteAction(Type objectType, IBurcatObject? objectBDP, string name, IBurcatObject?[] parameters)
         {
             LinkedList<Type> genericTypesList = [];
@@ -186,6 +288,11 @@ namespace BurcatProtocol
             else return ActionResult.Thrown(new NotInBurcatCacheException($"Method with name {name} in {objectType.Name} is not cached."));
         }
 
+        /// <summary>
+        /// Validates the cached field values and object-level state of a Burcat object.
+        /// </summary>
+        /// <param name="objectBDP">The object to validate.</param>
+        /// <returns><see langword="null"/> when the state is valid; otherwise, the validation exception.</returns>
         public static BurcatException? ValidateState(IBurcatObject objectBDP)
         {
             Type objectType = objectBDP.GetType();
@@ -206,6 +313,9 @@ namespace BurcatProtocol
             return null;
         }
 
+        /// <summary>
+        /// Represents a cached field or property with compiled get and set delegates.
+        /// </summary>
         private class ObjectField : IComparable<ObjectField>
         {
             private static Func<object?, object?> CreateGetter(FieldInfo info, bool isStatic)
@@ -327,6 +437,9 @@ namespace BurcatProtocol
             }
         }
 
+        /// <summary>
+        /// Represents an open generic method cached by name and parameter count.
+        /// </summary>
         private class GenericMethod : IComparable<GenericMethod>
         {
             private string Key { get; }
@@ -366,6 +479,9 @@ namespace BurcatProtocol
             }
         }
 
+        /// <summary>
+        /// Represents a cached constructor or method with compiled invocation delegates and validation metadata.
+        /// </summary>
         private class ObjectMethod : IEquatable<ObjectMethod>
         {
             private static Func<object?[], object?> CreateConstructor(ConstructorInfo info)
@@ -543,6 +659,9 @@ namespace BurcatProtocol
             }
         }
 
+        /// <summary>
+        /// Identifies a cached method group by declaring type, generic type arguments, and action name.
+        /// </summary>
         private class MethodKey : IComparable<MethodKey>
         {
             public GuidList ClassGuid { get; }

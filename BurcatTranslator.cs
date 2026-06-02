@@ -6,11 +6,22 @@ using System.Text;
 
 namespace BurcatProtocol
 {
+    /// <summary>
+    /// Converts supported CLR values to and from Burcat protocol translations.
+    /// </summary>
     public static class BurcatTranslator
     {
         private static Dictionary<Type, Guid> TypeDictionary { get; } = [];
         private static Dictionary<Guid, Translator> Translators { get; } = [];
 
+        /// <summary>
+        /// Registers a translator for a CLR type.
+        /// </summary>
+        /// <typeparam name="T">The CLR type to translate.</typeparam>
+        /// <param name="classID">The Burcat class identity for the translated type.</param>
+        /// <param name="toBDP">The function that serializes a value to bytes.</param>
+        /// <param name="fromBDP">The function that deserializes bytes to a value.</param>
+        /// <returns><see langword="true"/> when the translator was added; otherwise, <see langword="false"/>.</returns>
         public static bool Add<T>(Guid classID, Func<T, byte[]> toBDP, Func<byte[], T> fromBDP)
         {
             if (Translators.ContainsKey(classID)) return false;
@@ -28,8 +39,27 @@ namespace BurcatProtocol
                 return true;
             }
         }
+
+        /// <summary>
+        /// Registers an enum translator that stores enum values as signed 64-bit integers.
+        /// </summary>
+        /// <typeparam name="T">The enum type to translate.</typeparam>
+        /// <param name="classID">The Burcat class identity for the enum type.</param>
+        /// <returns><see langword="true"/> when the translator was added; otherwise, <see langword="false"/>.</returns>
         public static bool Add<T>(Guid classID) where T : Enum => Add(classID, v => BitConverter.GetBytes(Convert.ToInt64(v)), t => (T)Enum.ToObject(typeof(T), BitConverter.ToInt64(t)));
+
+        /// <summary>
+        /// Removes a translator by class identity.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity to remove.</param>
+        /// <returns><see langword="true"/> when the translator was removed; otherwise, <see langword="false"/>.</returns>
         public static bool Remove(Guid classID) => Translators.Remove(classID) && TypeDictionary.Remove(TypeDictionary.First(kvp => kvp.Value == classID).Key);
+
+        /// <summary>
+        /// Removes a translator by CLR type.
+        /// </summary>
+        /// <param name="type">The CLR type to remove.</param>
+        /// <returns><see langword="true"/> when the translator was removed; otherwise, <see langword="false"/>.</returns>
         public static bool Remove(Type type)
         {
             if (TypeDictionary.TryGetValue(type, out Guid classID))
@@ -42,6 +72,12 @@ namespace BurcatProtocol
             else return false;
         }
 
+        /// <summary>
+        /// Determines whether a class identity has a registered translator.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity to test.</param>
+        /// <param name="type">The translated CLR type when found.</param>
+        /// <returns><see langword="true"/> when the translator exists; otherwise, <see langword="false"/>.</returns>
         public static bool CanTranslate(Guid classID, [MaybeNullWhen(false)] out Type type)
         {
             if (Translators.TryGetValue(classID, out Translator? translator))
@@ -55,9 +91,30 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Determines whether a CLR type has a registered translator.
+        /// </summary>
+        /// <param name="type">The CLR type to test.</param>
+        /// <param name="classID">The Burcat class identity when found.</param>
+        /// <returns><see langword="true"/> when the translator exists; otherwise, <see langword="false"/>.</returns>
         public static bool CanTranslate(Type type, out Guid classID) => TypeDictionary.TryGetValue(type, out classID);
 
+        /// <summary>
+        /// Tries to translate a CLR value into a Burcat translation.
+        /// </summary>
+        /// <param name="value">The CLR value to translate.</param>
+        /// <param name="translation">The protocol translation when successful.</param>
+        /// <returns><see langword="true"/> when the value was translated; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate(object value, [MaybeNullWhen(false)] out BurcatTranslation translation) => TryTranslate(value.GetType(), value, out translation);
+
+        /// <summary>
+        /// Tries to translate a CLR value into a Burcat translation using an explicit value type.
+        /// </summary>
+        /// <param name="valueType">The CLR value type.</param>
+        /// <param name="value">The CLR value to translate.</param>
+        /// <param name="translation">The protocol translation when successful.</param>
+        /// <returns><see langword="true"/> when the value was translated; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate(Type valueType, object value, [MaybeNullWhen(false)] out BurcatTranslation translation)
         {
             if (valueType.IsEnum && BurcatChat.TryGetClassIdentity(valueType, out Guid _))
@@ -76,6 +133,14 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to translate protocol bytes back to a CLR value.
+        /// </summary>
+        /// <param name="classID">The translated value class identity.</param>
+        /// <param name="translation">The translated value bytes.</param>
+        /// <param name="value">The CLR value when successful.</param>
+        /// <returns><see langword="true"/> when the bytes were translated; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate(Guid classID, byte[] translation, [MaybeNullWhen(false)] out object value)
         {
             if (Translators.TryGetValue(classID, out Translator? translator))
@@ -89,6 +154,15 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to translate protocol bytes back to a typed CLR value.
+        /// </summary>
+        /// <typeparam name="T">The expected CLR value type.</typeparam>
+        /// <param name="classID">The translated value class identity.</param>
+        /// <param name="translation">The translated value bytes.</param>
+        /// <param name="value">The CLR value when successful.</param>
+        /// <returns><see langword="true"/> when the bytes were translated; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate<T>(Guid classID, byte[] translation, [MaybeNullWhen(false)] out T value)
         {
             if (TryTranslate(classID, translation, out object? obj))
@@ -102,10 +176,37 @@ namespace BurcatProtocol
                 return false;
             }
         }
+
+        /// <summary>
+        /// Tries to translate a protocol translation back to a CLR value.
+        /// </summary>
+        /// <param name="translation">The protocol translation.</param>
+        /// <param name="value">The CLR value when successful.</param>
+        /// <returns><see langword="true"/> when the translation was converted; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate(BurcatTranslation translation, [MaybeNullWhen(false)] out object value) => TryTranslate(translation.ClassID, translation.Data, out value);
+
+        /// <summary>
+        /// Tries to translate a protocol translation back to a typed CLR value.
+        /// </summary>
+        /// <typeparam name="T">The expected CLR value type.</typeparam>
+        /// <param name="translation">The protocol translation.</param>
+        /// <param name="value">The CLR value when successful.</param>
+        /// <returns><see langword="true"/> when the translation was converted; otherwise, <see langword="false"/>.</returns>
         public static bool TryTranslate<T>(BurcatTranslation translation, [MaybeNullWhen(false)] out T value) => TryTranslate(translation.ClassID, translation.Data, out value);
 
+        /// <summary>
+        /// Translates a CLR value into a Burcat translation.
+        /// </summary>
+        /// <param name="value">The CLR value to translate.</param>
+        /// <returns>The protocol translation.</returns>
         public static BurcatTranslation Translate(object value) => Translate(value.GetType(), value);
+
+        /// <summary>
+        /// Translates a CLR value into a Burcat translation using an explicit value type.
+        /// </summary>
+        /// <param name="valueType">The CLR value type.</param>
+        /// <param name="value">The CLR value to translate.</param>
+        /// <returns>The protocol translation.</returns>
         public static BurcatTranslation Translate(Type valueType, object value)
         {
             if (valueType.IsEnum && BurcatChat.TryGetClassIdentity(valueType, out Guid _)) return Translate(typeof(long), Transformable.DynamicCast<long>(value));
@@ -115,11 +216,44 @@ namespace BurcatProtocol
                 return new(classID, Translators[classID].ToBDP(value));
             }
         }
+
+        /// <summary>
+        /// Translates protocol bytes back to a CLR value.
+        /// </summary>
+        /// <param name="classID">The translated value class identity.</param>
+        /// <param name="translation">The translated value bytes.</param>
+        /// <returns>The CLR value.</returns>
         public static object Translate(Guid classID, byte[] translation) => Translators[classID].FromBDP(translation);
+
+        /// <summary>
+        /// Translates protocol bytes back to a typed CLR value.
+        /// </summary>
+        /// <typeparam name="T">The expected CLR value type.</typeparam>
+        /// <param name="classID">The translated value class identity.</param>
+        /// <param name="translation">The translated value bytes.</param>
+        /// <returns>The CLR value.</returns>
         public static T Translate<T>(Guid classID, byte[] translation) => (T)Translate(classID, translation);
+
+        /// <summary>
+        /// Translates a protocol translation back to a CLR value.
+        /// </summary>
+        /// <param name="translation">The protocol translation.</param>
+        /// <returns>The CLR value.</returns>
         public static object Translate(BurcatTranslation translation) => Translate(translation.ClassID, translation.Data);
+
+        /// <summary>
+        /// Translates a protocol translation back to a typed CLR value.
+        /// </summary>
+        /// <typeparam name="T">The expected CLR value type.</typeparam>
+        /// <param name="translation">The protocol translation.</param>
+        /// <returns>The CLR value.</returns>
         public static T Translate<T>(BurcatTranslation translation) => (T)Translate(translation.ClassID, translation.Data);
 
+        /// <summary>
+        /// Converts a protocol object or translation back to a CLR object value.
+        /// </summary>
+        /// <param name="value">The protocol value to convert.</param>
+        /// <returns>The CLR object value.</returns>
         public static object? ObjectBDPTranslate(IBurcatObject? value)
         {
             if (value is IBurcatObject objectBDP)
@@ -130,6 +264,12 @@ namespace BurcatProtocol
             }
             else return null;
         }
+
+        /// <summary>
+        /// Converts protocol objects or translations back to CLR object values.
+        /// </summary>
+        /// <param name="values">The protocol values to convert.</param>
+        /// <returns>The CLR object values.</returns>
         public static object?[] ObjectsBDPTranslate(IBurcatObject?[]? values)
         {
             if (values is null) return [];
@@ -141,6 +281,11 @@ namespace BurcatProtocol
             }
         }
 
+        /// <summary>
+        /// Converts a CLR object value into a Burcat protocol object or translation.
+        /// </summary>
+        /// <param name="value">The CLR value to convert.</param>
+        /// <returns>The protocol object value.</returns>
         public static IBurcatObject? ObjectTranslate(object? value)
         {
             if (value is null || value is NothingChart) return null;
@@ -148,6 +293,12 @@ namespace BurcatProtocol
             else if (value is IBurcatObject objectBDP) return objectBDP;
             else throw new InvalidCastException();
         }
+
+        /// <summary>
+        /// Converts CLR object values into Burcat protocol objects or translations.
+        /// </summary>
+        /// <param name="values">The CLR values to convert.</param>
+        /// <returns>The protocol object values.</returns>
         public static IBurcatObject?[] ObjectsTranslate(object?[]? values)
         {
             if (values is null) return [];
@@ -169,6 +320,9 @@ namespace BurcatProtocol
             }
         }
 
+        /// <summary>
+        /// Registers the built-in translators for primitive CLR values and arrays.
+        /// </summary>
         public static void LoadDefaults()
         {
             Add(new("00000000-0000-0000-0000-F00000000000"), BitConverter.GetBytes, t => BitConverter.ToBoolean(t));
@@ -213,6 +367,14 @@ namespace BurcatProtocol
             Add(new("00000000-0000-0000-0000-F10000000019"), v => [.. v.SelectMany(x => x.ToByteArray())], t => SpanTranslation(t, 16, b => new Guid(b)));
         }
 
+        /// <summary>
+        /// Splits translated bytes into fixed-size spans and translates each span.
+        /// </summary>
+        /// <typeparam name="T">The translated value type.</typeparam>
+        /// <param name="data">The translated byte data.</param>
+        /// <param name="spanLenght">The fixed byte length of each value.</param>
+        /// <param name="translation">The function that translates each span.</param>
+        /// <returns>The translated values.</returns>
         public static T[] SpanTranslation<T>(byte[] data, int spanLenght, Func<byte[], T> translation)
         {
             if (data.Length % spanLenght == 0)
