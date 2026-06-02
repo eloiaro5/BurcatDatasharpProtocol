@@ -986,7 +986,7 @@ namespace BurcatProtocol
         /// <param name="stream">The source stream.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The result of the received exchange.</returns>
-        public static async Task<ExchangeResult> RecieveAsync(IdentifiedStream stream, CancellationToken? token = null)
+        public static async Task<ExchangeResult> ReceiveAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
             try
             {
@@ -1215,7 +1215,7 @@ namespace BurcatProtocol
         /// <param name="stream">The source stream.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The result of the received exchange.</returns>
-        public static ExchangeResult Recieve(IdentifiedStream stream, CancellationToken? token = null) => RecieveAsync(stream, token).GetAwaiter().GetResult();
+        public static ExchangeResult Receive(IdentifiedStream stream, CancellationToken? token = null) => ReceiveAsync(stream, token).GetAwaiter().GetResult();
 
         private static async Task SendObject(IdentifiedStream stream, BurcatInstance instance, CancellationToken token)
         {

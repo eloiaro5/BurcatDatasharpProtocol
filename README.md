@@ -20,7 +20,7 @@ shape:
 - revisions, which describe the known state of a referenced object
 
 This makes it possible for one application to send an object to another
-application, ask for an object by reference, request a revision, update cache
+application, ask for an object by reference, request the revision, update cache
 state, delete cache state, or execute an action on an object or type.
 
 The protocol does not require all behavior to be hard-coded into a transport
@@ -172,7 +172,7 @@ Providers are the point where protocol data becomes application behavior.
 `IInternalProvider` handles local operations:
 
 - construct an object
-- get a revision
+- get the revision
 - get an object by reference
 - couple an object into cache or storage
 - decouple an object from cache or storage
@@ -213,7 +213,7 @@ Built-in external providers:
   useful result.
 
 This provider model can be used to implement least-resistance-path behavior:
-an application can ask several providers for a revision or object and accept
+an application can ask several providers for the revision or object and accept
 the first provider that can satisfy the request.
 
 ## Communication With `BurcatChat`
@@ -251,17 +251,15 @@ await BurcatChat.SendAsync<Message>(stream);
 ### Receiving Exchanges
 
 ```csharp
-ExchangeResult result = await BurcatChat.RecieveAsync(stream);
+ExchangeResult result = await BurcatChat.ReceiveAsync(stream);
 ```
 
-`RecieveAsync` processes the next protocol exchange and returns an
+`ReceiveAsync` processes the next protocol exchange and returns an
 `ExchangeResult` describing what was received and what was sent in response.
-
-The method name is currently spelled `Recieve` / `RecieveAsync` in the API.
 
 ### Requesting Revisions
 
-Ask configured providers for a revision:
+Ask configured providers for the revision:
 
 ```csharp
 Guid revision = await BurcatChat.RelayRevisionRequestAsync(
@@ -388,7 +386,7 @@ objects:
 
 These collections are useful when collection state must move through the
 protocol or participate in object construction. Referenced collections update
-their revision when mutated.
+their revision when mutated, if applicable.
 
 Example:
 
