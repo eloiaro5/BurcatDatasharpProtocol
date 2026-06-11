@@ -289,7 +289,7 @@ namespace BurcatProtocol
         /// <typeparam name="T">The object type.</typeparam>
         /// <param name="stream">The destination stream.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static Task SendAsync<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, new(typeof(T), null), token);
+        public static Task SendAsync<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, BurcatInstance.Build<T>(), token);
 
         /// <summary>
         /// Sends a Burcat instance through a stream.
@@ -808,7 +808,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(typeof(T), null), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes an action through the configured providers.
@@ -842,7 +842,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(typeof(T), null), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
 
         /// <summary>
@@ -934,7 +934,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(typeof(T), null), action, parameters, token);
+        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, BurcatInstance.Build<T>(), action, parameters, token);
 
         /// <summary>
         /// Sends an action request to another application through a stream.
@@ -968,7 +968,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(typeof(T), null), action, parameters, token);
+        public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, BurcatInstance.Build<T>(), action, parameters, token);
 
         /// <summary>
         /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
@@ -1055,8 +1055,8 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndRevisionRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, new UnsupportedBurcatObjectException(), revision);
-                    else return new(BurcatExchangeType.RevisionRequest, objectType, revision);
+                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
+                    else return new(BurcatExchangeType.RevisionRequest, new(objectType));
                 }
                 else if(scheme == GetClassIdentity<BeginObjectRequestSchematic>())
                 {
@@ -1082,7 +1082,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatInstance instance = AcceptedClasses.TryGetValue(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(streamID, classID, objectID, false, cancellation)) : new(typeof(NothingChart));
+                    BurcatInstance instance = AcceptedClasses.TryGetValue(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(streamID, classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingChart>();
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(stream, instance, cancellation);
@@ -1091,8 +1091,8 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndObjectRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, new UnsupportedBurcatObjectException());
-                    else return new(BurcatExchangeType.RevisionRequest, objectType, instance.Value);
+                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
+                    else return new(BurcatExchangeType.RevisionRequest, new(objectType), instance);
                 }
                 else if (scheme == GetClassIdentity<BeginCoupleSchematic>())
                 {
@@ -1115,13 +1115,13 @@ namespace BurcatProtocol
                     BurcatException? coupleException = await RelayCoupleAsync(streamID, reference, false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, coupleException is BurcatException exception ? new(exception) : new(typeof(BurcatException)), cancellation);
+                    await SendObject(stream, coupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<EndCoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCoupleSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    return new(BurcatExchangeType.Couple, instance, coupleException);
+                    return new(BurcatExchangeType.Couple, instance, BurcatInstance.Build(coupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginDecoupleSchematic>())
                 {
@@ -1144,13 +1144,13 @@ namespace BurcatProtocol
                     BurcatException? decoupleException = await RelayDecoupleAsync(streamID, reference, false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, decoupleException is BurcatException exception ? new(exception) : new(typeof(BurcatException)), cancellation);
+                    await SendObject(stream, decoupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<EndDecoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndDecoupleSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    return new(BurcatExchangeType.Decouple, instance, decoupleException);
+                    return new(BurcatExchangeType.Decouple, instance, BurcatInstance.Build(decoupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginActionSchematic>())
                 {
@@ -1203,7 +1203,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndActionSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndActionSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    return new(BurcatExchangeType.Action, instance, result, Encoding.Unicode.GetString(data), parameters);
+                    return new(BurcatExchangeType.Action, instance, BurcatInstance.Build(result), Encoding.Unicode.GetString(data), parameters);
                 }
                 else throw new InvalidDataException("No supported scheme");
             }

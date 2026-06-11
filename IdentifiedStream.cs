@@ -91,10 +91,14 @@ namespace BurcatProtocol
         /// <inheritdoc/>
         public override void Close()
         {
-            base.Close();
-
             ReadStream.Close();
             WriteStream.Close();
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            await ReadStream.DisposeAsync();
+            await WriteStream.DisposeAsync();
         }
     }
 }

@@ -81,7 +81,6 @@ namespace BurcatProtocol
         /// <param name="i2">The second reference.</param>
         /// <returns><see langword="true"/> when both references are equal; otherwise, <see langword="false"/>.</returns>
         public static bool operator ==(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => i1 is null && i2 is null || (i1 is not null && i2 is not null && i1.Value.Value == i2.Value.Value);
-
         /// <summary>
         /// Determines whether two typed Burcat references point to different identifiers.
         /// </summary>
@@ -89,6 +88,35 @@ namespace BurcatProtocol
         /// <param name="i2">The second reference.</param>
         /// <returns><see langword="true"/> when the references are different; otherwise, <see langword="false"/>.</returns>
         public static bool operator !=(BurcatIdentifier<T>? i1, BurcatIdentifier<T>? i2) => !(i1 == i2);
+
+        /// <summary>
+        /// Determines whether a uuid, representing an identifier, points to the same identifier as a typed Burcat reference.
+        /// </summary>
+        /// <param name="g">The uuid.</param>
+        /// <param name="i">The reference.</param>
+        /// <returns><see langword="true"/> when both references are equal; otherwise, <see langword="false"/>.</returns>
+        public static bool operator ==(Guid? g, BurcatIdentifier<T>? i) => g is null && i is null || (g is not null && i is not null && g.Value == i.Value.Value);
+        /// <summary>
+        /// Determines whether a uuid, representing an identifier, points to a different identifier as a typed Burcat reference.
+        /// </summary>
+        /// <param name="g">The uuid.</param>
+        /// <param name="i">The reference.</param>
+        /// <returns><see langword="true"/> when the references are different; otherwise, <see langword="false"/>.</returns>
+        public static bool operator !=(Guid? g, BurcatIdentifier<T>? i) => !(g == i);
+        /// <summary>
+        /// Determines whether a uuid, representing an identifier, points to the same identifier as a typed Burcat reference.
+        /// </summary>
+        /// <param name="g">The uuid.</param>
+        /// <param name="i">The reference.</param>
+        /// <returns><see langword="true"/> when both references are equal; otherwise, <see langword="false"/>.</returns>
+        public static bool operator ==(BurcatIdentifier<T>? i, Guid? g) => g == i;
+        /// <summary>
+        /// Determines whether a uuid, representing an identifier, points to a different identifier as a typed Burcat reference.
+        /// </summary>
+        /// <param name="g">The uuid.</param>
+        /// <param name="i">The reference.</param>
+        /// <returns><see langword="true"/> when the references are different; otherwise, <see langword="false"/>.</returns>
+        public static bool operator !=(BurcatIdentifier<T>? i, Guid? g) => g != i;
 
         /// <summary>
         /// Converts an object to a typed Burcat reference.

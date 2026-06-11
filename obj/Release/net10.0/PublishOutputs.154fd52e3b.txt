@@ -1,0 +1,3 @@
+C:\Users\eloic\source\repos\Burcat\publish\BurcatProtocol.dll
+C:\Users\eloic\source\repos\Burcat\publish\BurcatProtocol.deps.json
+C:\Users\eloic\source\repos\Burcat\publish\BurcatProtocol.pdb

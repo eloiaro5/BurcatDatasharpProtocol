@@ -11,7 +11,18 @@ namespace BurcatProtocol
         /// <typeparam name="T">The Burcat object type.</typeparam>
         /// <param name="instance">The object value, or <see langword="null"/>.</param>
         /// <returns>A Burcat instance wrapper.</returns>
-        public static BurcatInstance Build<T>(T? instance) where T : IBurcatObject => new(typeof(T), instance);
+        public static BurcatInstance Build<T>(T? instance = default) where T : IBurcatObject => new(typeof(T), instance);
+
+        /// <summary>
+        /// Builds an instance wrapper for a type unable to be constructed.
+        /// </summary>
+        /// <param name="type">The type to be sent.</param>
+        /// <returns>A Burcat instance wrapper.</returns>
+        public static BurcatInstance Build(Type type)
+        {
+            if (BurcatChat.AcceptsClass(type)) return new(type);
+            else throw new InvalidOperationException("The building type is not part of the accepted classes.");
+        }
 
         /// <summary>
         /// Gets the Burcat object type.
@@ -28,7 +39,7 @@ namespace BurcatProtocol
         /// </summary>
         /// <param name="type">The Burcat object type.</param>
         /// <param name="value">The optional object value.</param>
-        public BurcatInstance(Type type, IBurcatObject? value = null) { Type = type; Value = value; }
+        internal BurcatInstance(Type type, IBurcatObject? value = null) { Type = type; Value = value; }
 
         /// <summary>
         /// Initializes a Burcat instance wrapper from an object value.

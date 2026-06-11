@@ -47,14 +47,14 @@ namespace BurcatProtocol
         public BurcatExchangeType Type { get; }
 
         /// <summary>
-        /// Gets the value received from the stream.
+        /// Gets the instance received from the stream.
         /// </summary>
-        public object Recieved { get; }
+        public BurcatInstance Recieved { get; }
 
         /// <summary>
-        /// Gets the optional value sent in response.
+        /// Gets the optional instance sent in response.
         /// </summary>
-        public object? Sent { get; }
+        public BurcatInstance? Sent { get; }
 
         /// <summary>
         /// Gets optional action argument metadata.
@@ -75,18 +75,18 @@ namespace BurcatProtocol
         /// Initializes an exchange result.
         /// </summary>
         /// <param name="type">The exchange type.</param>
-        /// <param name="recieved">The received value.</param>
-        /// <param name="sent">The optional sent response value.</param>
-        public ExchangeResult(BurcatExchangeType type, object recieved, object? sent = null) { Type = type; Recieved = recieved; Sent = sent; }
+        /// <param name="recieved">The received instance.</param>
+        /// <param name="sent">The optional sent instance.</param>
+        public ExchangeResult(BurcatExchangeType type, BurcatInstance recieved, BurcatInstance? sent = null) { Type = type; Recieved = recieved; Sent = sent; }
 
         /// <summary>
         /// Initializes an exchange result with action metadata.
         /// </summary>
         /// <param name="type">The exchange type.</param>
-        /// <param name="recieved">The received value.</param>
-        /// <param name="sent">The sent response value.</param>
+        /// <param name="recieved">The received instance.</param>
+        /// <param name="sent">The sent instance.</param>
         /// <param name="nameMetadata">The name metadata.</param>
         /// <param name="argumentMetadata">The action argument metadata.</param>
-        public ExchangeResult(BurcatExchangeType type, object recieved, object sent, string nameMetadata, IBurcatObject?[] argumentMetadata) : this(type, recieved, sent) { NameMetadata = nameMetadata; ArgumentMetadata = argumentMetadata; }
+        public ExchangeResult(BurcatExchangeType type, BurcatInstance recieved, BurcatInstance sent, string nameMetadata, IBurcatObject?[] argumentMetadata) : this(type, recieved, sent) { NameMetadata = nameMetadata; ArgumentMetadata = argumentMetadata; }
     }
 }
