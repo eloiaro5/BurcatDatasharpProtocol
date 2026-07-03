@@ -79,6 +79,22 @@ namespace BurcatProtocol
         public GuidList(Guid[] guids) { this.guids = guids; hashCode = ComputeHashCode(guids); }
 
         /// <summary>
+        /// Initializes a composite key joining other composite keys.
+        /// </summary>
+        /// <param name="guidLists">The composite keys.</param>
+        public GuidList(IEnumerable<GuidList> guidLists)
+        {
+            LinkedList<Guid> guids = [];
+
+            foreach (GuidList guidList in guidLists)
+                foreach (Guid guid in guidList)
+                    guids.AddLast(guid);
+
+            this.guids = [.. guids];
+            hashCode = ComputeHashCode(this.guids);
+        }
+
+        /// <summary>
         /// Initializes a composite key from an object's runtime type.
         /// </summary>
         /// <param name="obj">The object whose runtime type is represented.</param>

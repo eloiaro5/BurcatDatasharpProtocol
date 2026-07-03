@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -592,19 +593,34 @@ namespace BurcatProtocol
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static T? SendObjectRequest<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
 
-        private static async Task<BurcatException?> RelayCoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
+        private static async Task<BurcatException?> RelayCoupleAsync(Guid? streamID, BurcatInstance instance, bool ignoreInternal, CancellationToken? token)
         {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
+            else
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
 
-            cancellation.ThrowIfCancellationRequested();
-            BurcatException? creationException = ignoreInternal ? new() : InternalProvider.CoupleCache(streamID, objectBDP, true);
+                cancellation.ThrowIfCancellationRequested();
+                BurcatException? creationException = ignoreInternal ? new() : InternalProvider.CoupleCache(streamID, instance.Value, true);
 
-            cancellation.ThrowIfCancellationRequested();
-            if (ExternalProvider is not null) creationException = await ExternalProvider.CoupleCache(streamID, objectBDP, true, cancellation) ?? creationException;
+                cancellation.ThrowIfCancellationRequested();
+                if (ExternalProvider is not null) creationException = await ExternalProvider.CoupleCache(streamID, instance.Value, true, cancellation) ?? creationException;
 
-            cancellation.ThrowIfCancellationRequested();
-            return creationException;
+                cancellation.ThrowIfCancellationRequested();
+                return creationException;
+            }
         }
+
+        /// <summary>
+        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static Task<BurcatException?> RelayCoupleAsync(BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(null, instance, ignoreInternal, token);
+
         /// <summary>
         /// Requests that the configured providers add or update an object in cache or storage.
         /// </summary>
@@ -613,7 +629,17 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayCoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(null, objectBDP, ignoreInternal, token);
+        public static Task<BurcatException?> RelayCoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(null, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayCouple(BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(instance, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Requests that the configured providers add or update an object in cache or storage.
@@ -626,6 +652,50 @@ namespace BurcatProtocol
         public static BurcatException? RelayCouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
+        /// Sends an explicit cache add or update request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> SendCoupleAsync(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null)
+        {
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
+            else
+                try
+                {
+                    CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+
+                    await stream.WriteAsync(GetClassIdentity<BeginCoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await SendObject(stream, instance, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<EndCoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return result;
+                }
+                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+
+        }
+
+        /// <summary>
         /// Sends an explicit cache add or update request to another application.
         /// </summary>
         /// <typeparam name="T">The object type.</typeparam>
@@ -633,38 +703,17 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to couple.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static async Task<BurcatException?> SendCoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
-        {
-            try
-            {
-                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+        public static Task<BurcatException?> SendCoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(stream, BurcatInstance.Build(objectBDP), token);
 
-                await stream.WriteAsync(GetClassIdentity<BeginCoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await SendObject(stream, objectBDP, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<EndCoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                return result;
-            }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
-        }
+        /// <summary>
+        /// Sends an explicit cache add or update request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? SendCouple(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null) => SendCoupleAsync(stream, instance, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an explicit cache add or update request to another application.
@@ -676,19 +725,34 @@ namespace BurcatProtocol
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static BurcatException? SendCouple<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(stream, objectBDP, token).GetAwaiter().GetResult();
 
-        private static async Task<BurcatException?> RelayDecoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
+        private static async Task<BurcatException?> RelayDecoupleAsync(Guid? streamID, BurcatInstance instance, bool ignoreInternal, CancellationToken? token)
         {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+            if (instance.Value is null) throw new InvalidOperationException("Cannot decouple a null object.");
+            else
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
 
-            cancellation.ThrowIfCancellationRequested();
-            BurcatException? creationException = ignoreInternal ? new() : InternalProvider.DecoupleCache(streamID, objectBDP);
+                cancellation.ThrowIfCancellationRequested();
+                BurcatException? creationException = ignoreInternal ? new() : InternalProvider.DecoupleCache(streamID, instance.Value);
 
-            cancellation.ThrowIfCancellationRequested();
-            if (ExternalProvider is not null) creationException = await ExternalProvider.DecoupleCache(streamID, objectBDP, cancellation) ?? creationException;
+                cancellation.ThrowIfCancellationRequested();
+                if (ExternalProvider is not null) creationException = await ExternalProvider.DecoupleCache(streamID, instance.Value, cancellation) ?? creationException;
 
-            cancellation.ThrowIfCancellationRequested();
-            return creationException;
+                cancellation.ThrowIfCancellationRequested();
+                return creationException;
+            }
         }
+
+        /// <summary>
+        /// Requests that the configured providers delete a Burcat instance from cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static Task<BurcatException?> RelayDecoupleAsync(BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(null, instance, ignoreInternal, token);
+
         /// <summary>
         /// Requests that the configured providers delete an object from cache or storage.
         /// </summary>
@@ -697,7 +761,17 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayDecoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(null, objectBDP, ignoreInternal, token);
+        public static Task<BurcatException?> RelayDecoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(null, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers delete a Burcat instance from cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayDecouple(BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(instance, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Requests that the configured providers delete an object from cache or storage.
@@ -710,6 +784,49 @@ namespace BurcatProtocol
         public static BurcatException? RelayDecouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
+        /// Sends an explicit cache delete request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> SendDecoupleAsync(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null)
+        {
+            if (instance.Value is null) throw new InvalidOperationException("Cannot decouple a null object.");
+            else
+                try
+                {
+                    CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+
+                    await stream.WriteAsync(GetClassIdentity<BeginDecoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await SendObject(stream, instance, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<EndDecoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return result;
+                }
+                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+        }
+
+        /// <summary>
         /// Sends an explicit cache delete request to another application.
         /// </summary>
         /// <typeparam name="T">The object type.</typeparam>
@@ -717,38 +834,17 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to decouple.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static async Task<BurcatException?> SendDecoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
-        {
-            try
-            {
-                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+        public static Task<BurcatException?> SendDecoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(stream, BurcatInstance.Build(objectBDP), token);
 
-                await stream.WriteAsync(GetClassIdentity<BeginDecoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await SendObject(stream, objectBDP, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<EndDecoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                return result;
-            }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
-        }
+        /// <summary>
+        /// Sends an explicit cache delete request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? SendDecouple(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null) => SendDecoupleAsync(stream, instance, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an explicit cache delete request to another application.
@@ -1112,7 +1208,7 @@ namespace BurcatProtocol
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? coupleException = await RelayCoupleAsync(streamID, reference, false, cancellation);
+                    BurcatException? coupleException = await RelayCoupleAsync(streamID, BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(stream, coupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
@@ -1141,7 +1237,7 @@ namespace BurcatProtocol
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? decoupleException = await RelayDecoupleAsync(streamID, reference, false, cancellation);
+                    BurcatException? decoupleException = await RelayDecoupleAsync(streamID, BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(stream, decoupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);

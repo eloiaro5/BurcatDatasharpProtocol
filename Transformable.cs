@@ -16,14 +16,16 @@ namespace BurcatProtocol
     /// </summary>
     public static class Transformable
     {
-        private static ConcurrentDictionary<Transform, byte> Transforms { get; } = [];
+        private static ConcurrentDictionary<GuidList, Transform> Transforms { get; } = [];
         private static ConcurrentDictionary<Guid, byte> FlowIdentifiers { get; } = [];
         private static Transform TryDynamicCast(Type sourceType, object value, Type targetType, Guid? flowID = null)
         {
             Guid fID = flowID ?? GuidExtensions.GenerateSequential();
 
             Transform transform = new(sourceType, targetType, TransformType.None);
-            if (Transforms.Any(t => t.Key.CompareTo(transform) == 0)) return Transforms.First(t => t.Key.CompareTo(transform) == 0).Key;
+            GuidList transformKey = new([transform.From, transform.To]);
+
+            if (Transforms.TryGetValue(transformKey, out Transform equal)) return equal;
             else if (targetType.IsAssignableFrom(sourceType)) transform = new(sourceType, targetType, TransformType.Direct);
             else if (sourceType.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => (m.Name == "op_Implicit" || m.Name == "op_Explicit") && targetType.IsAssignableFrom(m.ReturnType)) is MethodInfo sChanger) transform = new(sourceType, targetType, sChanger);
             else if (targetType.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m =>
@@ -57,7 +59,7 @@ namespace BurcatProtocol
             else transform = new(sourceType, targetType, TransformType.None);
 
             FlowIdentifiers.Remove(fID, out _);
-            Transforms.GetOrAdd(transform, 0);
+            Transforms.GetOrAdd(transformKey, transform);
             return transform;
         }
         private static Array? BuildArray(IEnumerable values, Type elementType)
@@ -419,7 +421,7 @@ namespace BurcatProtocol
         /// <summary>
         /// Represents a cached conversion between two CLR type keys.
         /// </summary>
-        private readonly struct Transform : IComparable<Transform>
+        private readonly struct Transform
         {
             private static MethodInfo Converter { get; } = typeof(Transformable).GetMethod(nameof(DynamicCast), [typeof(object), typeof(Type)])!;
 
@@ -479,22 +481,6 @@ namespace BurcatProtocol
             public Transform(Type from, Type to, ConstructorInfo constructor) : this(from, to, CreateConstructor(constructor)) { }
             public Transform(Type from, Type to, MethodInfo transformMethod) : this(from, to, CreateFunctionMethod(transformMethod)) { }
             public Transform(Type from, Type to, Type elementType) : this(from, to, CreateArrayMethod(elementType)) { }
-
-            public override bool Equals([NotNullWhen(true)] object? obj)
-            {
-                if (obj is null) return false;
-                else if (obj is Transform transform) return CompareTo(transform) == 0;
-                else return false;
-            }
-            public override int GetHashCode() => HashCode.Combine(From, To, TransformType);
-
-            public int CompareTo(Transform other)
-            {
-                int fromComparation = From.CompareTo(other.From);
-
-                if (fromComparation == 0) return To.CompareTo(other.To);
-                else return fromComparation;
-            }
         }
     }
 }

@@ -6,7 +6,7 @@ namespace BurcatProtocol
     public sealed class BurcatInstance
     {
         /// <summary>
-        /// Builds an instance wrapper for a typed Burcat object value.
+        /// Builds an instance wrapper for a typed Burcat object value, setting the type as the apparent type.
         /// </summary>
         /// <typeparam name="T">The Burcat object type.</typeparam>
         /// <param name="instance">The object value, or <see langword="null"/>.</param>
@@ -42,7 +42,7 @@ namespace BurcatProtocol
         internal BurcatInstance(Type type, IBurcatObject? value = null) { Type = type; Value = value; }
 
         /// <summary>
-        /// Initializes a Burcat instance wrapper from an object value.
+        /// Initializes a Burcat instance wrapper from an object value, setting the type as the instance type.
         /// </summary>
         /// <param name="value">The object value.</param>
         public BurcatInstance(IBurcatObject value) : this(value.GetType(), value) { }
