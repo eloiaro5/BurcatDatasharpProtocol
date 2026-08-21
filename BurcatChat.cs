@@ -1,4 +1,5 @@
 ﻿using BurcatProtocol.Providers;
+using BurcatProtocol.Transactions;
 using System.Collections.Concurrent;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
@@ -192,6 +193,24 @@ namespace BurcatProtocol
 
         private static ConcurrentDictionary<Guid, SemaphoreSlim> Semaphores { get; } = [];
 
+        public static BurcatUpgrade UpgradeStatus { get; set; }
+
+        /// <summary>
+        /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
+        /// </summary>
+        public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
+
+        /// <summary>
+        /// Gets or sets the provider used to forward object operations to an external source.
+        /// </summary>
+        public static IExternalProvider? ExternalProvider { get; set; }
+
+        public static void SetInternalProvider(IInternalProvider provider)
+        {
+            if (UpgradeStatus.HasFlag(BurcatUpgrade.Transactional) && provider is not ITransactionalProvider) throw new InvalidOperationException("Cannot set an provider that doesn't handle transactions when transactions are active.");
+            else InternalProvider = provider;
+        }
+
         /// <summary>
         /// Advances a stream until the next known protocol ending marker is found.
         /// </summary>
@@ -199,39 +218,33 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static async Task PurgeAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-            if (ControlAsyncAccess) if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+            SemaphoreSlim? semaphore = null;
 
             try
             {
-                Guid[] endings = [
-                                GetClassIdentity<EndObjectSchematic>(),
-                                GetClassIdentity<EndRevisionRequestSchematic>(),
-                                GetClassIdentity<EndObjectRequestSchematic>(),
-                                GetClassIdentity<EndCoupleSchematic>(),
-                                GetClassIdentity<EndDecoupleSchematic>(),
-                                GetClassIdentity<EndActionSchematic>()
-                ];
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
 
                 byte[] data = new byte[16];
                 await stream.ReadExactlyAsync(data, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                Guid actual = new(data);
-                while (!endings.Contains(actual))
+                Guid expected = GetClassIdentity<EndCommunicationSchematic>(), actual = new(data);
+                while (actual != expected)
                 {
                     byte[] d = new byte[1];
                     await stream.ReadExactlyAsync(d, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    for (int i = 14; i >= 0; i--) data[i] = data[i + 1];
+                    for (int i = 0; i < 15; i++) data[i] = data[i + 1];
                     data[15] = d[0];
                     actual = new(data);
 
                     cancellation.ThrowIfCancellationRequested();
                 }
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -241,6 +254,7 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static void Purge(IdentifiedStream stream, CancellationToken? token = null) => PurgeAsync(stream, token).GetAwaiter().GetResult();
 
+
         /// <summary>
         /// Sends a Burcat instance through a stream.
         /// </summary>
@@ -249,10 +263,16 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public async static Task SendAsync(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
 
                 await stream.WriteAsync(GetClassIdentity<BeginObjectSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
@@ -271,8 +291,14 @@ namespace BurcatProtocol
 
                 await stream.WriteAsync(GetClassIdentity<EndObjectSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -362,10 +388,16 @@ namespace BurcatProtocol
         /// <returns>The revision returned by the remote application.</returns>
         public static async Task<Guid> SendRevisionRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
 
                 await stream.WriteAsync(GetClassIdentity<BeginRevisionRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
@@ -404,9 +436,15 @@ namespace BurcatProtocol
                 await stream.WriteAsync(GetClassIdentity<EndRevisionRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
+
                 return revision;
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -504,10 +542,16 @@ namespace BurcatProtocol
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static async Task<IBurcatObject?> SendObjectRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
 
                 await stream.WriteAsync(GetClassIdentity<BeginObjectRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
@@ -539,9 +583,15 @@ namespace BurcatProtocol
                 await stream.WriteAsync(GetClassIdentity<EndObjectRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
+
                 return result;
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -599,15 +649,12 @@ namespace BurcatProtocol
             else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-
                 cancellation.ThrowIfCancellationRequested();
-                BurcatException? creationException = ignoreInternal ? new() : InternalProvider.CoupleCache(streamID, instance.Value, true);
 
-                cancellation.ThrowIfCancellationRequested();
-                if (ExternalProvider is not null) creationException = await ExternalProvider.CoupleCache(streamID, instance.Value, true, cancellation) ?? creationException;
-
-                cancellation.ThrowIfCancellationRequested();
-                return creationException;
+                if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.CoupleCache(streamID, instance.Value, true, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.CoupleCache(streamID, instance.Value, true) ?? await ExternalProvider.CoupleCache(streamID, instance.Value, true, cancellation);
+                else return InternalProvider.CoupleCache(streamID, instance.Value, true);
             }
         }
 
@@ -663,10 +710,17 @@ namespace BurcatProtocol
         {
             if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
             else
+            {
+                SemaphoreSlim? semaphore = null;
+
                 try
                 {
                     CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                    semaphore = await TryWaitSemaphore(stream, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
 
                     await stream.WriteAsync(GetClassIdentity<BeginCoupleSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
@@ -689,10 +743,16 @@ namespace BurcatProtocol
                     await stream.WriteAsync(GetClassIdentity<EndCoupleSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
+                    await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return result;
                 }
-                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
-
+                finally { semaphore?.Release(); }
+            }
         }
 
         /// <summary>
@@ -727,19 +787,16 @@ namespace BurcatProtocol
 
         private static async Task<BurcatException?> RelayDecoupleAsync(Guid? streamID, BurcatInstance instance, bool ignoreInternal, CancellationToken? token)
         {
-            if (instance.Value is null) throw new InvalidOperationException("Cannot decouple a null object.");
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
             else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-
                 cancellation.ThrowIfCancellationRequested();
-                BurcatException? creationException = ignoreInternal ? new() : InternalProvider.DecoupleCache(streamID, instance.Value);
 
-                cancellation.ThrowIfCancellationRequested();
-                if (ExternalProvider is not null) creationException = await ExternalProvider.DecoupleCache(streamID, instance.Value, cancellation) ?? creationException;
-
-                cancellation.ThrowIfCancellationRequested();
-                return creationException;
+                if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.DecoupleCache(streamID, instance.Value, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.DecoupleCache(streamID, instance.Value) ?? await ExternalProvider.DecoupleCache(streamID, instance.Value, cancellation);
+                else return InternalProvider.DecoupleCache(streamID, instance.Value);
             }
         }
 
@@ -795,10 +852,17 @@ namespace BurcatProtocol
         {
             if (instance.Value is null) throw new InvalidOperationException("Cannot decouple a null object.");
             else
+            {
+                SemaphoreSlim? semaphore = null;
+
                 try
                 {
                     CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                    semaphore = await TryWaitSemaphore(stream, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
 
                     await stream.WriteAsync(GetClassIdentity<BeginDecoupleSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
@@ -821,9 +885,16 @@ namespace BurcatProtocol
                     await stream.WriteAsync(GetClassIdentity<EndDecoupleSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
+                    await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return result;
                 }
-                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+                finally { semaphore?.Release(); }
+            }
         }
 
         /// <summary>
@@ -957,10 +1028,16 @@ namespace BurcatProtocol
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
+                SemaphoreSlim? semaphore = null;
+
                 try
                 {
                     CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                    semaphore = await TryWaitSemaphore(stream, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
 
                     await stream.WriteAsync(GetClassIdentity<BeginActionSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
@@ -1003,9 +1080,15 @@ namespace BurcatProtocol
                     await stream.WriteAsync(GetClassIdentity<EndActionSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
+                    await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return result;
                 }
-                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+                finally { semaphore?.Release(); }
             }
         }
 
@@ -1067,16 +1150,6 @@ namespace BurcatProtocol
         public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, BurcatInstance.Build<T>(), action, parameters, token);
 
         /// <summary>
-        /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
-        /// </summary>
-        public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
-
-        /// <summary>
-        /// Gets or sets the provider used to forward object operations to an external source.
-        /// </summary>
-        public static IExternalProvider? ExternalProvider { get; set; }
-
-        /// <summary>
         /// Receives and processes the next Burcat protocol exchange from a stream.
         /// </summary>
         /// <param name="stream">The source stream.</param>
@@ -1084,24 +1157,30 @@ namespace BurcatProtocol
         /// <returns>The result of the received exchange.</returns>
         public static async Task<ExchangeResult> ReceiveAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                if (!await RecieveScheme<BeginCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<BeginCommunicationSchematic>()}, but data read doesn't correspond to");
+                cancellation.ThrowIfCancellationRequested();
 
                 Guid scheme = await RecieveScheme(stream, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
                 if (scheme == GetClassIdentity<BeginObjectSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     BurcatInstance instance = await RecieveObject(stream, cancellation);
@@ -1110,18 +1189,24 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndObjectSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return new(BurcatExchangeType.Object, instance);
                 }
                 else if (scheme == GetClassIdentity<BeginRevisionRequestSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
@@ -1151,19 +1236,25 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndRevisionRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
                     else return new(BurcatExchangeType.RevisionRequest, new(objectType));
                 }
                 else if(scheme == GetClassIdentity<BeginObjectRequestSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
@@ -1187,19 +1278,25 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndObjectRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
-                    else return new(BurcatExchangeType.RevisionRequest, new(objectType), instance);
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (objectType is null) return new(BurcatExchangeType.ObjectRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
+                    else return new(BurcatExchangeType.ObjectRequest, new(objectType), instance);
                 }
                 else if (scheme == GetClassIdentity<BeginCoupleSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     BurcatInstance instance = await RecieveObject(stream, cancellation);
@@ -1217,18 +1314,24 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndCoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCoupleSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return new(BurcatExchangeType.Couple, instance, BurcatInstance.Build(coupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginDecoupleSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     BurcatInstance instance = await RecieveObject(stream, cancellation);
@@ -1246,18 +1349,24 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndDecoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndDecoupleSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return new(BurcatExchangeType.Decouple, instance, BurcatInstance.Build(decoupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginActionSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
                     await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     BurcatInstance instance = await RecieveObject(stream, cancellation);
@@ -1299,11 +1408,17 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<EndActionSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndActionSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
+                    if (!await RecieveScheme<EndCommunicationSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
                     return new(BurcatExchangeType.Action, instance, BurcatInstance.Build(result), Encoding.Unicode.GetString(data), parameters);
                 }
                 else throw new InvalidDataException("No supported scheme");
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
         /// <summary>
         /// Receives and processes the next Burcat protocol exchange from a stream.
@@ -1558,6 +1673,17 @@ namespace BurcatProtocol
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
         }
 
+        private async static Task<SemaphoreSlim?> TryWaitSemaphore(IdentifiedStream stream, CancellationToken token)
+        {
+            if (ControlAsyncAccess)
+            {
+                SemaphoreSlim candidate = Semaphores.GetOrAdd(stream.Identifier, static _ => new SemaphoreSlim(1, 1));
+                await candidate.WaitAsync(token);
+                return candidate;
+            }
+            else return null;
+        }
+
         private abstract class Scheme : IBurcatObject
         {
             Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
@@ -1590,29 +1716,41 @@ namespace BurcatProtocol
         [BurcatIdentity("00000000-0000-0000-0000-000000000011")]
         private sealed class FieldUpdateScheme : Scheme { }
 
-        [BurcatIdentity("00000000-0000-0000-0000-000000000100")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001000")]
+        private sealed class BeginCommunicationSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001100")]
+        private sealed class EndCommunicationSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001001")]
+        private sealed class BeginHeaderSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001101")]
+        private sealed class EndHeaderSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001002")]
         private sealed class BeginObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000110")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001102")]
         private sealed class EndObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000101")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001003")]
         private sealed class BeginRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000111")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001103")]
         private sealed class EndRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000102")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001004")]
         private sealed class BeginObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000112")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001104")]
         private sealed class EndObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000103")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001005")]
         private sealed class BeginActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000113")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001105")]
         private sealed class EndActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000104")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001006")]
         private sealed class BeginCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000114")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001106")]
         private sealed class EndCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000105")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001007")]
         private sealed class BeginDecoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000115")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001107")]
         private sealed class EndDecoupleSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001008")]
+        private sealed class BeginUpgradeSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001108")]
+        private sealed class EndUpgradeSchematic : Scheme { }
     }
 }

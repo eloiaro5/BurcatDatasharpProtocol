@@ -13,7 +13,6 @@ namespace BurcatProtocol
     {
         /// <inheritdoc/>
         Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
-
         /// <inheritdoc/>
         Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
@@ -67,7 +66,6 @@ namespace BurcatProtocol
 
         /// <inheritdoc/>
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
-
         /// <inheritdoc/>
         void IBurcatObject.SetBurcatFields(BurcatField[] fields) { }
 

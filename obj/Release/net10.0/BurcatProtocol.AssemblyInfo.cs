@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+efe4680f4f1739757de8cf062c14a77da96fb5ae")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+48b52bcc1d08f0b5dab905d7b46c413837057c0c")]
 [assembly: System.Reflection.AssemblyProductAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BurcatProtocol")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

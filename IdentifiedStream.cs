@@ -71,7 +71,28 @@ namespace BurcatProtocol
         public override void Flush() => WriteStream.Flush();
 
         /// <inheritdoc/>
-        public override int Read(byte[] buffer, int offset, int count) => ReadStream.Read(buffer, offset, count);
+        public override Task FlushAsync(CancellationToken  cancellationToken) => WriteStream.FlushAsync(cancellationToken);
+
+        /// <inheritdoc/>
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            WriteStream.Flush();
+            return ReadStream.Read(buffer, offset, count);
+        }
+
+        /// <inheritdoc/>
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await WriteStream.FlushAsync(cancellationToken);
+            return await ReadStream.ReadAsync(buffer, offset, count, cancellationToken);
+        }
+
+        /// <inheritdoc/>
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await WriteStream.FlushAsync(cancellationToken);
+            return await ReadStream.ReadAsync(buffer, cancellationToken);
+        }
 
         /// <inheritdoc/>
         public override long Seek(long offset, SeekOrigin origin)
@@ -97,8 +118,14 @@ namespace BurcatProtocol
 
         public override async ValueTask DisposeAsync()
         {
-            await ReadStream.DisposeAsync();
-            await WriteStream.DisposeAsync();
+            if (ReferenceEquals(ReadStream, WriteStream)) await ReadStream.DisposeAsync();
+            else
+            {
+                await ReadStream.DisposeAsync();
+                await WriteStream.DisposeAsync();
+            }
+
+            GC.SuppressFinalize(this);
         }
     }
 }

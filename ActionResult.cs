@@ -54,6 +54,20 @@ namespace BurcatProtocol
         /// <param name="result">The value returned by the action.</param>
         public ActionResult(IBurcatObject? result) { SuccessfulExecution = true; Value = result is NothingChart ? null : result; }
 
+        /// <summary>
+        /// Gets the wrapped value as the requested type, or throws the exception represented by an unsuccessful result.
+        /// </summary>
+        /// <typeparam name="T">The requested value type.</typeparam>
+        /// <returns>The wrapped <see cref="Value"/> as <typeparamref name="T"/>.</returns>
+        /// <exception cref="Exception">Thrown when <see cref="Exception"/> contains a protocol exception.</exception>
+        /// <exception cref="InvalidCastException">Thrown when <see cref="Value"/> is not compatible with <typeparamref name="T"/>.</exception>
+        public T ValueOrThrow<T>()
+        {
+            if (Exception is not null) throw BurcatException.ToException(Exception);
+            else if (Value is T tValue) return tValue;
+            else throw new InvalidCastException();
+        }
+
         /// <inheritdoc/>
         BurcatField[] IBurcatObject.GetBurcatFields() => [new(nameof(SuccessfulExecution), BurcatTranslator.Translate(SuccessfulExecution)), BurcatField.FromExpression(this, a => a.Exception)];
 
