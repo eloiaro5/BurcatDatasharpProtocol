@@ -48,6 +48,17 @@ namespace BurcatProtocol.Providers
         public IEnumerator<IInternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
         /// <inheritdoc/>
+        public override BurcatHeaderSet GetHeaders(Guid? streamID)
+        {
+            BurcatHeaderSet result = [];
+            foreach (IInternalProvider provider in Providers)
+                foreach (BurcatHeaderSet.BurcatHeader header in provider.GetHeaders(streamID))
+                    result.Add(header);
+
+            return result;
+        }
+
+        /// <inheritdoc/>
         public override Guid GetRevision(Guid? streamID, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)

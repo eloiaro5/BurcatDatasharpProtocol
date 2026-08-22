@@ -6,6 +6,16 @@ namespace BurcatProtocol
     public enum BurcatExchangeType
     {
         /// <summary>
+        /// Supported identities were requested.
+        /// </summary>
+        Identities,
+
+        /// <summary>
+        /// Supported headers were requested.
+        /// </summary>
+        Headers,
+
+        /// <summary>
         /// An object was sent.
         /// </summary>
         Object,

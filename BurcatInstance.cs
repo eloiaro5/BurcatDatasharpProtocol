@@ -20,7 +20,7 @@ namespace BurcatProtocol
         /// <returns>A Burcat instance wrapper.</returns>
         public static BurcatInstance Build(Type type)
         {
-            if (BurcatChat.AcceptsClass(type)) return new(type);
+            if (BurcatChat.AcceptedIdentities.Contains(type)) return new(type);
             else throw new InvalidOperationException("The building type is not part of the accepted classes.");
         }
 

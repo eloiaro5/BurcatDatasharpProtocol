@@ -62,7 +62,7 @@ namespace BurcatProtocol
         /// Resolves the represented Burcat class identity to a CLR type.
         /// </summary>
         /// <returns>The registered CLR type.</returns>
-        public Type GetTypeCLR() => BurcatChat.GetType(ClassID);
+        public Type GetTypeCLR() => BurcatChat.AcceptedIdentities.GetType(ClassID);
 
         /// <inheritdoc/>
         BurcatField[] IBurcatObject.GetBurcatFields() => [];

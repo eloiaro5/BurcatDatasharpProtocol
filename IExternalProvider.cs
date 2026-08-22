@@ -6,6 +6,22 @@ namespace BurcatProtocol
     public interface IExternalProvider
     {
         /// <summary>
+        /// Gets the Burcat identities this provider supports for a communication session.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The identities supported by the provider.</returns>
+        Task<BurcatIdentitySet> GetIdentities(Guid? streamID, CancellationToken token);
+
+        /// <summary>
+        /// Gets the headers this provider can handle for a communication session.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <param name="token">The cancellation token.</param>
+        /// <returns>The headers supported by the provider.</returns>
+        Task<BurcatHeaderSet> GetHeaders(Guid? streamID, CancellationToken token);
+
+        /// <summary>
         /// Gets the revision of an external object reference.
         /// </summary>
         /// <param name="streamID">The optional permission or communication session that requested the revision.</param>

@@ -76,7 +76,7 @@ namespace BurcatProtocol
         /// Initializes a composite key from GUID values.
         /// </summary>
         /// <param name="guids">The GUID values.</param>
-        public GuidList(Guid[] guids) { this.guids = guids; hashCode = ComputeHashCode(guids); }
+        public GuidList(IEnumerable<Guid> guids) { this.guids = [.. guids]; hashCode = ComputeHashCode(this.guids); }
 
         /// <summary>
         /// Initializes a composite key joining other composite keys.

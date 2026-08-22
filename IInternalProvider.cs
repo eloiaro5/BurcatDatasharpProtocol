@@ -20,6 +20,20 @@ namespace BurcatProtocol
     public interface IInternalProvider
     {
         /// <summary>
+        /// Gets the Burcat identities this provider supports for a communication session.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <returns>The identities supported by the provider.</returns>
+        BurcatIdentitySet GetIdentities(Guid? streamID);
+
+        /// <summary>
+        /// Gets the headers this provider can handle for a communication session.
+        /// </summary>
+        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <returns>The headers supported by the provider.</returns>
+        BurcatHeaderSet GetHeaders(Guid? streamID);
+
+        /// <summary>
         /// Constructs a Burcat object, or returns <see langword="null"/> for a null object value.
         /// </summary>
         /// <param name="streamID">
@@ -98,6 +112,12 @@ namespace BurcatProtocol
     /// </remarks>
     public abstract class InternalProvider : IInternalProvider
     {
+        /// <inheritdoc/>
+        public virtual BurcatIdentitySet GetIdentities(Guid? streamID) => BurcatChat.AcceptedIdentities;
+
+        /// <inheritdoc/>
+        public virtual BurcatHeaderSet GetHeaders(Guid? streamID) => [];
+
         /// <inheritdoc/>
         public virtual IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields)
         {

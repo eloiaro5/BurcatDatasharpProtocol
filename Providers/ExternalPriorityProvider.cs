@@ -66,6 +66,48 @@ namespace BurcatProtocol.Providers
         public void RemoveAt(int index) => Providers.RemoveAt(index);
 
         /// <inheritdoc/>
+        public async Task<BurcatIdentitySet> GetIdentities(Guid? streamID, CancellationToken token)
+        {
+            using IEnumerator<IExternalProvider> providers = Providers.GetEnumerator();
+            token.ThrowIfCancellationRequested();
+
+            if (providers.MoveNext())
+            {
+                BurcatIdentitySet result = new(await providers.Current.GetIdentities(streamID, token));
+                while (result.Count != 0 && providers.MoveNext())
+                {
+                    token.ThrowIfCancellationRequested();
+                    result.IntersectWith(await providers.Current.GetIdentities(streamID, token));
+                }
+
+                token.ThrowIfCancellationRequested();
+                return result;
+            }
+            else return [];
+        }
+
+        /// <inheritdoc/>
+        public async Task<BurcatHeaderSet> GetHeaders(Guid? streamID, CancellationToken token)
+        {
+            using IEnumerator<IExternalProvider> providers = Providers.GetEnumerator();
+            token.ThrowIfCancellationRequested();
+
+            if (providers.MoveNext())
+            {
+                BurcatHeaderSet result = [.. await providers.Current.GetHeaders(streamID, token)];
+                while (result.Count != 0 && providers.MoveNext())
+                {
+                    token.ThrowIfCancellationRequested();
+                    result.IntersectWith(await providers.Current.GetHeaders(streamID, token));
+                }
+
+                token.ThrowIfCancellationRequested();
+                return result;
+            }
+            else return [];
+        }
+
+        /// <inheritdoc/>
         public async Task<Guid> GetRevision(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
