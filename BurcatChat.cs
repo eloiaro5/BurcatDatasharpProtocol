@@ -193,7 +193,7 @@ namespace BurcatProtocol
 
         private static ConcurrentDictionary<Guid, SemaphoreSlim> Semaphores { get; } = [];
 
-        public static BurcatUpgrade UpgradeStatus { get; set; }
+        public static BurcatHeaderCollection Headers { get; } = [];
 
         /// <summary>
         /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
@@ -205,10 +205,55 @@ namespace BurcatProtocol
         /// </summary>
         public static IExternalProvider? ExternalProvider { get; set; }
 
-        public static void SetInternalProvider(IInternalProvider provider)
+        public static async Task<BurcatHeaderCollection> TestHeadersAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
-            if (UpgradeStatus.HasFlag(BurcatUpgrade.Transactional) && provider is not ITransactionalProvider) throw new InvalidOperationException("Cannot set an provider that doesn't handle transactions when transactions are active.");
-            else InternalProvider = provider;
+            SemaphoreSlim? semaphore = null;
+
+            try
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginTestHeadersSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await SendObject(stream, Headers, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                BurcatHeaderCollection result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatHeaderCollection>();
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndTestHeadersSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
+
+                return result;
+            }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -1696,24 +1741,26 @@ namespace BurcatProtocol
         [BurcatIdentity("00000000-0000-0000-0000-000000000001")]
         private sealed class StreamScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000002")]
-        private sealed class VersionScheme : Scheme { }
+        private sealed class HeadersScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000003")]
-        private sealed class RevisionScheme : Scheme { }
+        private sealed class VersionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000004")]
-        private sealed class RawScheme : Scheme { }
+        private sealed class RevisionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000005")]
-        private sealed class RefinedScheme : Scheme { }
+        private sealed class RawScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000006")]
-        private sealed class InstanceScheme : Scheme { }
+        private sealed class RefinedScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000007")]
-        private sealed class FieldScheme : Scheme { }
+        private sealed class InstanceScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000008")]
-        private sealed class ConstructorScheme : Scheme { }
+        private sealed class FieldScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000009")]
-        private sealed class ActionScheme : Scheme { }
+        private sealed class ConstructorScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000010")]
-        private sealed class ParameterScheme : Scheme { }
+        private sealed class ActionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000011")]
+        private sealed class ParameterScheme : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000000012")]
         private sealed class FieldUpdateScheme : Scheme { }
 
         [BurcatIdentity("00000000-0000-0000-0000-000000001000")]
@@ -1721,9 +1768,9 @@ namespace BurcatProtocol
         [BurcatIdentity("00000000-0000-0000-0000-000000001100")]
         private sealed class EndCommunicationSchematic : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000001001")]
-        private sealed class BeginHeaderSchematic : Scheme { }
+        private sealed class BeginTestHeadersSchematic : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000001101")]
-        private sealed class EndHeaderSchematic : Scheme { }
+        private sealed class EndTestHeadersSchematic : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000001002")]
         private sealed class BeginObjectSchematic : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000001102")]
