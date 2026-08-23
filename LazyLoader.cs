@@ -7,7 +7,7 @@ using System.Text;
 namespace BurcatProtocol
 {
     /// <summary>
-    /// Lazily resolves a referenced Burcat object through the configured providers.
+    /// Lazily resolves and optionally updates a referenced Burcat object while forwarding additional headers.
     /// </summary>
     /// <typeparam name="T">The object type to load.</typeparam>
     [BurcatIdentity("00000000-0000-0000-0000-79e7141382c2")]
@@ -20,6 +20,11 @@ namespace BurcatProtocol
         Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
 
         private T? value;
+
+        /// <summary>
+        /// Gets the headers added to provider operations performed by this loader.
+        /// </summary>
+        public BurcatHeaderSet AdditionalHeaders { get; }
 
         /// <summary>
         /// Gets the Burcat class identity of the object type to load.
@@ -39,9 +44,25 @@ namespace BurcatProtocol
         /// <summary>
         /// Initializes a lazy loader for an object identifier.
         /// </summary>
+        /// <param name="additionalHeaders">The headers to add to provider operations.</param>
         /// <param name="objectID">The referenced object identifier.</param>
         /// <param name="canSet">Whether this loader can update the referenced object.</param>
-        public LazyLoader(Guid objectID, bool canSet = default) { ObjectID = objectID; value = default; CanSet = canSet; }
+        public LazyLoader(BurcatHeaderSet additionalHeaders, Guid objectID, bool canSet = default) { AdditionalHeaders = additionalHeaders; ObjectID = objectID; value = default; CanSet = canSet; }
+
+        /// <summary>
+        /// Initializes a lazy loader for an object identifier.
+        /// </summary>
+        /// <param name="objectID">The referenced object identifier.</param>
+        /// <param name="canSet">Whether this loader can update the referenced object.</param>
+        public LazyLoader(Guid objectID, bool canSet = default) { AdditionalHeaders = []; ObjectID = objectID; value = default; CanSet = canSet; }
+
+        /// <summary>
+        /// Initializes a lazy loader for a typed object identifier.
+        /// </summary>
+        /// <param name="additionalHeaders">The headers to add to provider operations.</param>
+        /// <param name="identifier">The typed object identifier.</param>
+        /// <param name="canSet">Whether this loader can update the referenced object.</param>
+        public LazyLoader(BurcatHeaderSet additionalHeaders, BurcatIdentifier<T> identifier, bool canSet = default) : this(additionalHeaders, identifier.Value, canSet) { }
 
         /// <summary>
         /// Initializes a lazy loader for a typed object identifier.
@@ -58,7 +79,7 @@ namespace BurcatProtocol
         /// <returns>The loaded object, or <see langword="null"/> when unavailable.</returns>
         public async Task<T?> GetValueAsync(bool ignoreInternal = false, CancellationToken ? token = null)
         {
-            value = await BurcatChat.RelayObjectRequestAsync<T>(ObjectID, ignoreInternal, token);
+            value = await BurcatChat.RelayObjectRequestAsync<T>(new(AdditionalHeaders), ObjectID, ignoreInternal, token);
             return value;
         }
 
@@ -82,7 +103,7 @@ namespace BurcatProtocol
             if (CanSet)
             {
                 this.value = value;
-                await BurcatChat.RelayCoupleAsync(value, ignoreInternal, token);
+                await BurcatChat.RelayCoupleAsync(new(AdditionalHeaders), value, ignoreInternal, token);
             }
             else throw new InvalidOperationException("Cannot set a readonly lazy loader.");
         }
