@@ -20,7 +20,6 @@ namespace BurcatProtocol.Collections
 
         /// <inheritdoc/>
         public int Count => items.Count;
-
         /// <inheritdoc/>
         public bool IsReadOnly => false;
 

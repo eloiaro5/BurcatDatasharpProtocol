@@ -1,4 +1,4 @@
-using BurcatProtocol.Annotations;
+﻿using BurcatProtocol.Annotations;
 using System;
 using System.Collections;
 using System.Collections.Generic;

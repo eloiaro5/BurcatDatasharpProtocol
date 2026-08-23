@@ -1,21 +1,24 @@
 ﻿using BurcatProtocol.Providers;
 using System.Collections.Concurrent;
 using System.Data;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Transactions;
+using static BurcatProtocol.BurcatHeaderSet;
 
 namespace BurcatProtocol
 {
     /// <summary>
-    /// Communicates <see cref="IBurcatObject"/> instances between applications through Burcat protocol streams.
+    /// Communicates <see cref="IBurcatObject"/> instances and negotiated headers through Burcat protocol streams.
     /// </summary>
     /// <remarks>
     /// This class manages supported Burcat classes and their identities, object sending,
     /// object and revision requests, explicit cache coupling and decoupling, action
-    /// requests, received exchange processing, and stream purging after invalid data.
+    /// requests, header negotiation and forwarding, received exchange processing, and
+    /// stream purging after invalid data.
     /// </remarks>
     public static class BurcatChat
     {
@@ -89,107 +92,155 @@ namespace BurcatProtocol
         /// <returns>The Burcat class identity.</returns>
         public static Guid GetClassIdentity(object objectBDP) => GetClassIdentity(objectBDP.GetType());
 
-        private static SortedDictionary<Guid, Type> AcceptedClasses { get; } = [];
+        /// <summary>
+        /// Gets the Burcat identities and CLR types accepted by this application.
+        /// </summary>
+        public static BurcatIdentitySet AcceptedIdentities { get; } = [];
 
         /// <summary>
-        /// Registers a type as accepted by this application for protocol communication.
+        /// Gets the application headers included in each header negotiation.
         /// </summary>
-        /// <param name="type">The type to register.</param>
-        /// <returns><see langword="true"/> when the class was registered; otherwise, <see langword="false"/>.</returns>
-        public static bool AcceptClass(Type type)
-        {
-            if (TryGetClassIdentity(type, out Guid identity)) return AcceptedClasses.TryAdd(identity, type);
-            else return false;
-        }
-
-        /// <summary>
-        /// Registers all Burcat-identifiable types from an assembly.
-        /// </summary>
-        /// <param name="assembly">The assembly to scan.</param>
-        public static void AcceptClasses(Assembly assembly)
-        {
-            foreach (Type type in assembly.GetTypes())
-                AcceptClass(type);
-        }
-
-        /// <summary>
-        /// Registers all Burcat-identifiable types from the assemblies loaded in the current application domain.
-        /// </summary>
-        public static void AcceptClasses()
-        {
-            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-                AcceptClasses(assembly);
-        }
-
-        /// <summary>
-        /// Determines whether a Burcat class identity is accepted by this application.
-        /// </summary>
-        /// <param name="identity">The Burcat class identity to test.</param>
-        /// <returns><see langword="true"/> when the identity is accepted; otherwise, <see langword="false"/>.</returns>
-        public static bool AcceptsClass(Guid identity)
-        {
-            if (!AcceptedClasses.ContainsKey(GetClassIdentity<NothingChart>())) AcceptClasses(typeof(BurcatChat).Assembly);
-            return AcceptedClasses.ContainsKey(identity);
-        }
-
-        /// <summary>
-        /// Determines whether a CLR type is accepted by this application.
-        /// </summary>
-        /// <param name="type">The type to test.</param>
-        /// <returns><see langword="true"/> when the type is accepted; otherwise, <see langword="false"/>.</returns>
-        public static bool AcceptsClass(Type type)
-        {
-            if (AcceptedClasses.TryGetValue(GetClassIdentity(type), out Type? accepted)) return accepted.IsAssignableFrom(type);
-            else return false;
-        }
-
-        /// <summary>
-        /// Determines whether a CLR type is accepted by this application.
-        /// </summary>
-        /// <typeparam name="T">The type to test.</typeparam>
-        /// <returns><see langword="true"/> when the type is accepted; otherwise, <see langword="false"/>.</returns>
-        public static bool AcceptsClass<T>() => AcceptsClass(typeof(T));
-
-        /// <summary>
-        /// Determines whether all Burcat-identifiable types in an assembly are accepted by this application.
-        /// </summary>
-        /// <param name="assembly">The assembly to test.</param>
-        /// <returns><see langword="true"/> when all types are accepted; otherwise, <see langword="false"/>.</returns>
-        public static bool AcceptsClasses(Assembly assembly)
-        {
-            foreach (Type type in assembly.GetTypes())
-                if (!AcceptsClass(type)) return false;
-
-            return true;
-        }
-
-        /// <summary>
-        /// Tries to get the CLR type registered for a Burcat class identity.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity to resolve.</param>
-        /// <param name="type">The registered CLR type when found.</param>
-        /// <returns><see langword="true"/> when the type was found; otherwise, <see langword="false"/>.</returns>
-        public static bool TryGetType(Guid classID, [MaybeNullWhen(false)] out Type type) => AcceptedClasses.TryGetValue(classID, out type);
-
-        /// <summary>
-        /// Gets the CLR type registered for a Burcat class identity.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity to resolve.</param>
-        /// <returns>The registered CLR type.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when no type is registered for the identity.</exception>
-        public static Type GetType(Guid classID)
-        {
-            if (TryGetType(classID, out Type? type)) return type;
-            else throw new InvalidOperationException($"There's no type with the specified identifier.");
-        }
-
-        /// <summary>
-        /// Gets the CLR types accepted by this application.
-        /// </summary>
-        /// <returns>The accepted CLR types.</returns>
-        public static IEnumerable<Type> GetAcceptedClasses() => AcceptedClasses.Values;
+        public static BurcatHeaderSet Headers { get; } = [];
 
         private static ConcurrentDictionary<Guid, SemaphoreSlim> Semaphores { get; } = [];
+
+        /// <summary>
+        /// Gets or sets the provider used for header-aware local construction, lookup, cache updates, deletes, and actions.
+        /// </summary>
+        public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
+
+        /// <summary>
+        /// Gets or sets the provider used to forward object operations and their additional headers to an external source.
+        /// </summary>
+        public static IExternalProvider? ExternalProvider { get; set; }
+
+        /// <summary>
+        /// Asynchronously gets the identities supported by the configured external provider.
+        /// </summary>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The supported identities, or an empty set when no external provider is configured.</returns>
+        public static async Task<BurcatIdentitySet> GetIdentitiesAsync(CancellationToken? token = null) => ExternalProvider is IExternalProvider provider ? await provider.GetIdentities(token ?? new CancellationTokenSource(DefaultTimeOut).Token) : [];
+
+        /// <summary>
+        /// Gets the identities supported by the configured external provider.
+        /// </summary>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The supported identities, or an empty set when no external provider is configured.</returns>
+        public static BurcatIdentitySet GetIdentities(CancellationToken? token = null) => GetIdentitiesAsync(token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Asynchronously requests the identities supported by the remote endpoint of an identified stream.
+        /// </summary>
+        /// <param name="stream">The stream over which to perform identity negotiation.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The identities reported by the remote endpoint.</returns>
+        public static async Task<BurcatIdentitySet> GetIdentitiesAsync(IdentifiedStream stream, CancellationToken? token = null)
+        {
+            SemaphoreSlim? semaphore = null;
+
+            try
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginIdentitiesSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                BurcatHead head = await ExchangeHead(stream, Headers, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                BurcatIdentitySet result = (await RecieveObject(stream, head, cancellation)).ForceValue<BurcatIdentitySet>();
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndIdentitiesSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
+
+                return result;
+            }
+            finally { semaphore?.Release(); }
+        }
+
+        /// <summary>
+        /// Requests the identities supported by the remote endpoint of an identified stream.
+        /// </summary>
+        /// <param name="stream">The stream over which to perform identity negotiation.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The identities reported by the remote endpoint.</returns>
+        public static BurcatIdentitySet GetIdentities(IdentifiedStream stream, CancellationToken? token = null) => GetIdentitiesAsync(stream, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Asynchronously gets the headers supported by the configured external provider.
+        /// </summary>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The supported headers, or an empty collection when no external provider is configured.</returns>
+        public static async Task<BurcatHeaderSet> GetHeadersAsync(CancellationToken? token = null) => ExternalProvider is IExternalProvider provider ? await provider.GetHeaders(token ?? new CancellationTokenSource(DefaultTimeOut).Token) : [];
+
+        /// <summary>
+        /// Gets the headers supported by the configured external provider.
+        /// </summary>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The supported headers, or an empty collection when no external provider is configured.</returns>
+        public static BurcatHeaderSet GetHeaders(CancellationToken? token = null) => GetHeadersAsync(token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Asynchronously requests the headers supported by the remote endpoint of an identified stream.
+        /// </summary>
+        /// <param name="stream">The stream over which to perform header negotiation.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The headers reported by the remote endpoint.</returns>
+        public static async Task<BurcatHeaderSet> GetHeadersAsync(IdentifiedStream stream, CancellationToken? token = null)
+        {
+            SemaphoreSlim? semaphore = null;
+
+            try
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<BeginHeadersSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                BurcatHead head = await ExchangeHead(stream, Headers, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                BurcatHeaderSet result = (await RecieveObject(stream, head, cancellation)).ForceValue<BurcatHeaderSet>();
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndHeadersSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await stream.FlushAsync();
+                cancellation.ThrowIfCancellationRequested();
+
+                return result;
+            }
+            finally { semaphore?.Release(); }
+        }
+
+        /// <summary>
+        /// Requests the headers supported by the remote endpoint of an identified stream.
+        /// </summary>
+        /// <param name="stream">The stream over which to perform header negotiation.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The headers reported by the remote endpoint.</returns>
+        public static BurcatHeaderSet GetHeaders(IdentifiedStream stream, CancellationToken? token = null) => GetHeadersAsync(stream, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Advances a stream until the next known protocol ending marker is found.
@@ -198,39 +249,33 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static async Task PurgeAsync(IdentifiedStream stream, CancellationToken? token = null)
         {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-            if (ControlAsyncAccess) if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+            SemaphoreSlim? semaphore = null;
 
             try
             {
-                Guid[] endings = [
-                                GetClassIdentity<EndObjectSchematic>(),
-                                GetClassIdentity<EndRevisionRequestSchematic>(),
-                                GetClassIdentity<EndObjectRequestSchematic>(),
-                                GetClassIdentity<EndCoupleSchematic>(),
-                                GetClassIdentity<EndDecoupleSchematic>(),
-                                GetClassIdentity<EndActionSchematic>()
-                ];
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                semaphore = await TryWaitSemaphore(stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
 
                 byte[] data = new byte[16];
                 await stream.ReadExactlyAsync(data, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                Guid actual = new(data);
-                while (!endings.Contains(actual))
+                Guid expected = GetClassIdentity<EndCommunicationSchematic>(), actual = new(data);
+                while (actual != expected)
                 {
                     byte[] d = new byte[1];
                     await stream.ReadExactlyAsync(d, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    for (int i = 14; i >= 0; i--) data[i] = data[i + 1];
+                    for (int i = 0; i < 15; i++) data[i] = data[i + 1];
                     data[15] = d[0];
                     actual = new(data);
 
                     cancellation.ThrowIfCancellationRequested();
                 }
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -240,106 +285,112 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static void Purge(IdentifiedStream stream, CancellationToken? token = null) => PurgeAsync(stream, token).GetAwaiter().GetResult();
 
+
         /// <summary>
         /// Sends a Burcat instance through a stream.
         /// </summary>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="instance">The instance metadata and value to send.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public async static Task SendAsync(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null)
+        public async static Task SendAsync(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                await stream.WriteAsync(GetClassIdentity<BeginObjectSchematic>().ToByteArray(), cancellation);
+                semaphore = await TryWaitSemaphore(head.Stream, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginObjectSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                await ExchangeHead(head.Stream, head.Headers, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await SendObject(stream, instance, cancellation);
+                await SendObject(head.Stream, instance, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<EndObjectSchematic>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<EndObjectSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.FlushAsync();
                 cancellation.ThrowIfCancellationRequested();
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
         /// Sends a Burcat object through a stream.
         /// </summary>
         /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="objectBDP">The object to send.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static Task SendAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, new(objectBDP), token);
+        public static Task SendAsync<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, new(objectBDP), token);
 
         /// <summary>
         /// Sends a null Burcat object value for a type through a stream.
         /// </summary>
         /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static Task SendAsync<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, BurcatInstance.Build<T>(), token);
+        public static Task SendAsync<T>(BurcatDirectionalHead head, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, BurcatInstance.Build<T>(), token);
 
         /// <summary>
         /// Sends a Burcat instance through a stream.
         /// </summary>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="instance">The instance metadata and value to send.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static void Send(IdentifiedStream stream, BurcatInstance instance, CancellationToken? token = null) => SendAsync(stream, instance, token).GetAwaiter().GetResult();
+        public static void Send(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null) => SendAsync(head, instance, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends a Burcat object through a stream.
         /// </summary>
         /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="objectBDP">The object to send.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static void Send<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(stream, objectBDP, token).GetAwaiter().GetResult();
+        public static void Send<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, objectBDP, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends a null Burcat object value for a type through a stream.
-        /// </summary>
+        /// </summary> 
         /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="stream">The destination stream.</param>
+        /// <param name="head">The destination stream and headers to send with the operation.</param>
         /// <param name="token">The optional cancellation token.</param>
-        public static void Send<T>(IdentifiedStream stream, CancellationToken? token = null) where T : IBurcatObject => SendAsync<T>(stream, token).GetAwaiter().GetResult();
+        public static void Send<T>(BurcatDirectionalHead head, CancellationToken? token = null) where T : IBurcatObject => SendAsync<T>(head, token).GetAwaiter().GetResult();
 
-        private static async Task<Guid> RelayRevisionRequestAsync(Guid? streamID, Guid classID, Guid objectID, bool ignoreInternal, CancellationToken? token)
+        /// <summary>
+        /// Resolves the current revision for an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
+        public static async Task<Guid> RelayRevisionRequestAsync(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
         {
             CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
             Guid version;
 
-            if (AcceptedClasses.TryGetValue(classID, out Type? type))
+            if (AcceptedIdentities.TryGetType(classID, out Type? type))
             {
-                version = ignoreInternal ? Guid.Empty : InternalProvider.GetRevision(streamID, type, objectID);
-                if (version == Guid.Empty && ExternalProvider is not null) version = await ExternalProvider.GetRevision(streamID, type, objectID, cancellation);
+                version = ignoreInternal ? Guid.Empty : InternalProvider.GetRevision(head, type, objectID);
+                if (version == Guid.Empty && ExternalProvider is not null) version = await ExternalProvider.GetRevision(head, type, objectID, cancellation);
                 cancellation.ThrowIfCancellationRequested();
             }
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
 
             return version;
         }
-        /// <summary>
-        /// Resolves the current revision for an object reference through the configured providers.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity of the referenced object.</param>
-        /// <param name="objectID">The object reference identity.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
-        public static Task<Guid> RelayRevisionRequestAsync(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(null, classID, objectID, ignoreInternal, token);
 
         /// <summary>
         /// Resolves the current revision for an object reference through the configured providers.
@@ -349,7 +400,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
-        public static Guid RelayRevisionRequest(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Guid RelayRevisionRequest(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends a revision request to another application through a stream.
@@ -359,53 +410,59 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The revision returned by the remote application.</returns>
-        public static async Task<Guid> SendRevisionRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
+        public static async Task<Guid> SendRevisionRequestAsync(BurcatDirectionalHead head, Guid classID, Guid objectID, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                await stream.WriteAsync(GetClassIdentity<BeginRevisionRequestSchematic>().ToByteArray(), cancellation);
+                semaphore = await TryWaitSemaphore(head.Stream, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginRevisionRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                BurcatHead otherHead = await ExchangeHead(head.Stream, head.Headers, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(classID.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(classID.ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(objectID.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(objectID.ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                if (!await RecieveScheme<RevisionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<RevisionScheme>()}, but data read doesn't correspond to.");
+                if (!await RecieveScheme<RevisionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<RevisionScheme>()}, but data read doesn't correspond to.");
                 cancellation.ThrowIfCancellationRequested();
 
                 byte[] guid = new byte[16];
-                await stream.ReadExactlyAsync(guid, cancellation); Guid revision = new(guid);
+                await head.Stream.ReadExactlyAsync(guid, cancellation); Guid revision = new(guid);
                 cancellation.ThrowIfCancellationRequested();
 
-                if (!await RecieveScheme<RevisionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<RevisionScheme>()}, but data read doesn't correspond to.");
+                if (!await RecieveScheme<RevisionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<RevisionScheme>()}, but data read doesn't correspond to.");
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<EndRevisionRequestSchematic>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<EndRevisionRequestSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.FlushAsync();
                 cancellation.ThrowIfCancellationRequested();
 
                 return revision;
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
 
         /// <summary>
@@ -416,32 +473,31 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The revision returned by the remote application.</returns>
-        public static Guid SendRevisionRequest(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null) => SendRevisionRequestAsync(stream, classID, objectID, token).GetAwaiter().GetResult();
+        public static Guid SendRevisionRequest(BurcatDirectionalHead head, Guid classID, Guid objectID, CancellationToken? token = null) => SendRevisionRequestAsync(head, classID, objectID, token).GetAwaiter().GetResult();
 
-        private static async Task<IBurcatObject?> RelayObjectRequestAsync(Guid? streamID, Guid classID, Guid objectID, bool ignoreInternal, CancellationToken? token)
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
+        public static async Task<IBurcatObject?> RelayObjectRequestAsync(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
         {
             CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
             IBurcatObject? reference;
 
-            if (AcceptedClasses.TryGetValue(classID, out Type? type))
+            if (AcceptedIdentities.TryGetType(classID, out Type? type))
             {
-                reference = ignoreInternal ? null : InternalProvider.GetObject(streamID, type, objectID);
-                if (reference is null && ExternalProvider is not null) reference = await ExternalProvider.GetObject(streamID, type, objectID, cancellation);
+                reference = ignoreInternal ? null : InternalProvider.GetObject(head, type, objectID);
+                if (reference is null && ExternalProvider is not null) reference = await ExternalProvider.GetObject(head, type, objectID, cancellation);
                 cancellation.ThrowIfCancellationRequested();
             }
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
 
             return reference;
         }
-        /// <summary>
-        /// Resolves an object reference through the configured providers.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity of the referenced object.</param>
-        /// <param name="objectID">The object reference identity.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static Task<IBurcatObject?> RelayObjectRequestAsync(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(null, classID, objectID, ignoreInternal, token);
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -451,7 +507,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static async Task<T?> RelayObjectRequestAsync<T>(Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await RelayObjectRequestAsync(GetClassIdentity<T>(), objectID, ignoreInternal, token); return result; }
+        public static async Task<T?> RelayObjectRequestAsync<T>(BurcatBoradcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await RelayObjectRequestAsync(head, GetClassIdentity<T>(), objectID, ignoreInternal, token); return result; }
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -461,7 +517,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static Task<T?> RelayObjectRequestAsync<T>(BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>((Guid)objectID, ignoreInternal, token);
+        public static Task<T?> RelayObjectRequestAsync<T>(BurcatBoradcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, (Guid)objectID, ignoreInternal, token);
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -471,7 +527,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static IBurcatObject? RelayObjectRequest(Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static IBurcatObject? RelayObjectRequest(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -481,7 +537,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static T? RelayObjectRequest<T>(Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static T? RelayObjectRequest<T>(BurcatBoradcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -491,7 +547,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static T? RelayObjectRequest<T>(BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static T? RelayObjectRequest<T>(BurcatBoradcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -501,46 +557,52 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static async Task<IBurcatObject?> SendObjectRequestAsync(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null)
+        public static async Task<IBurcatObject?> SendObjectRequestAsync(BurcatDirectionalHead head, Guid classID, Guid objectID, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                await stream.WriteAsync(GetClassIdentity<BeginObjectRequestSchematic>().ToByteArray(), cancellation);
+                semaphore = await TryWaitSemaphore(head.Stream, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<BeginObjectRequestSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                BurcatHead otherHead = await ExchangeHead(head.Stream, head.Headers, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(classID.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(classID.ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(objectID.ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(objectID.ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                IBurcatObject? result = (await RecieveObject(stream, cancellation)).Value;
+                IBurcatObject? result = (await RecieveObject(head.Stream, otherHead, cancellation)).Value;
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<EndObjectRequestSchematic>().ToByteArray(), cancellation);
+                await head.Stream.WriteAsync(GetClassIdentity<EndObjectRequestSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                await head.Stream.FlushAsync();
                 cancellation.ThrowIfCancellationRequested();
 
                 return result;
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -550,7 +612,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static async Task<T?> SendObjectRequestAsync<T>(IdentifiedStream stream, Guid objectID, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await SendObjectRequestAsync(stream, GetClassIdentity<T>(), objectID, token); return result; }
+        public static async Task<T?> SendObjectRequestAsync<T>(BurcatDirectionalHead head, Guid objectID, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await SendObjectRequestAsync(head, GetClassIdentity<T>(), objectID, token); return result; }
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -560,7 +622,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The typed object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static Task<T?> SendObjectRequestAsync<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, (Guid)objectID, token);
+        public static Task<T?> SendObjectRequestAsync<T>(BurcatDirectionalHead head, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(head, (Guid)objectID, token);
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -570,7 +632,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static IBurcatObject? SendObjectRequest(IdentifiedStream stream, Guid classID, Guid objectID, CancellationToken? token = null) => SendObjectRequestAsync(stream, classID, objectID, token).GetAwaiter().GetResult();
+        public static IBurcatObject? SendObjectRequest(BurcatDirectionalHead head, Guid classID, Guid objectID, CancellationToken? token = null) => SendObjectRequestAsync(head, classID, objectID, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -580,7 +642,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static T? SendObjectRequest<T>(IdentifiedStream stream, Guid objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
+        public static T? SendObjectRequest<T>(BurcatDirectionalHead head, Guid objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(head, objectID, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -590,30 +652,30 @@ namespace BurcatProtocol
         /// <param name="objectID">The typed object reference identity.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
-        public static T? SendObjectRequest<T>(IdentifiedStream stream, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(stream, objectID, token).GetAwaiter().GetResult();
+        public static T? SendObjectRequest<T>(BurcatDirectionalHead head, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(head, objectID, token).GetAwaiter().GetResult();
 
-        private static async Task<BurcatException?> RelayCoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
+        /// <summary>
+        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> RelayCoupleAsync(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
         {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
+            else
+            {
+                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                cancellation.ThrowIfCancellationRequested();
 
-            cancellation.ThrowIfCancellationRequested();
-            BurcatException? creationException = ignoreInternal ? new() : InternalProvider.CoupleCache(streamID, objectBDP, true);
-
-            cancellation.ThrowIfCancellationRequested();
-            if (ExternalProvider is not null) creationException = await ExternalProvider.CoupleCache(streamID, objectBDP, true, cancellation) ?? creationException;
-
-            cancellation.ThrowIfCancellationRequested();
-            return creationException;
+                if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.CoupleCache(head, instance.Value, true, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.CoupleCache(head, instance.Value, true) ?? await ExternalProvider.CoupleCache(head, instance.Value, true, cancellation);
+                else return InternalProvider.CoupleCache(head, instance.Value, true);
+            }
         }
-        /// <summary>
-        /// Requests that the configured providers add or update an object in cache or storage.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="objectBDP">The object to couple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayCoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(null, objectBDP, ignoreInternal, token);
 
         /// <summary>
         /// Requests that the configured providers add or update an object in cache or storage.
@@ -623,7 +685,78 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static BurcatException? RelayCouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> RelayCoupleAsync<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayCouple(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Requests that the configured providers add or update an object in cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        public static BurcatException? RelayCouple<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an explicit cache add or update request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> SendCoupleAsync(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null)
+        {
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
+            else
+            {
+                SemaphoreSlim? semaphore = null;
+
+                try
+                {
+                    CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                    semaphore = await TryWaitSemaphore(head.Stream, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginCoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatHead otherHead = await ExchangeHead(head.Stream, head.Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await SendObject(head.Stream, instance, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatException? result = (await RecieveObject(head.Stream, otherHead, cancellation)).ForceValue<BurcatException?>();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<EndCoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return result;
+                }
+                finally { semaphore?.Release(); }
+            }
+        }
 
         /// <summary>
         /// Sends an explicit cache add or update request to another application.
@@ -633,38 +766,17 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to couple.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static async Task<BurcatException?> SendCoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
-        {
-            try
-            {
-                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
+        public static Task<BurcatException?> SendCoupleAsync<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(head, BurcatInstance.Build(objectBDP), token);
 
-                await stream.WriteAsync(GetClassIdentity<BeginCoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await SendObject(stream, objectBDP, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<EndCoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                return result;
-            }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
-        }
+        /// <summary>
+        /// Sends an explicit cache add or update request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? SendCouple(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null) => SendCoupleAsync(head, instance, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an explicit cache add or update request to another application.
@@ -674,80 +786,110 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to couple.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static BurcatException? SendCouple<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(stream, objectBDP, token).GetAwaiter().GetResult();
+        public static BurcatException? SendCouple<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(head, objectBDP, token).GetAwaiter().GetResult();
 
-        private static async Task<BurcatException?> RelayDecoupleAsync<T>(Guid? streamID, T objectBDP, bool ignoreInternal, CancellationToken? token) where T : IBurcatObject
-        {
-            CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-
-            cancellation.ThrowIfCancellationRequested();
-            BurcatException? creationException = ignoreInternal ? new() : InternalProvider.DecoupleCache(streamID, objectBDP);
-
-            cancellation.ThrowIfCancellationRequested();
-            if (ExternalProvider is not null) creationException = await ExternalProvider.DecoupleCache(streamID, objectBDP, cancellation) ?? creationException;
-
-            cancellation.ThrowIfCancellationRequested();
-            return creationException;
-        }
         /// <summary>
-        /// Requests that the configured providers delete an object from cache or storage.
+        /// Requests that the configured providers delete a Burcat instance from cache or storage.
         /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayDecoupleAsync<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(null, objectBDP, ignoreInternal, token);
-
-        /// <summary>
-        /// Requests that the configured providers delete an object from cache or storage.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="objectBDP">The object to decouple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static BurcatException? RelayDecouple<T>(T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
-
-        /// <summary>
-        /// Sends an explicit cache delete request to another application.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="stream">The stream connected to the remote application.</param>
-        /// <param name="objectBDP">The object to decouple.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static async Task<BurcatException?> SendDecoupleAsync<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> RelayDecoupleAsync(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
         {
-            try
+            if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
+            else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                await stream.WriteAsync(GetClassIdentity<BeginDecoupleSchematic>().ToByteArray(), cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await SendObject(stream, objectBDP, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                BurcatException? result = (await RecieveObject(stream, cancellation)).ForceValue<BurcatException?>();
-                cancellation.ThrowIfCancellationRequested();
-
-                await stream.WriteAsync(GetClassIdentity<EndDecoupleSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                return result;
+                if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.DecoupleCache(head, instance.Value, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.DecoupleCache(head, instance.Value) ?? await ExternalProvider.DecoupleCache(head, instance.Value, cancellation);
+                else return InternalProvider.DecoupleCache(head, instance.Value);
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+        }
+
+        /// <summary>
+        /// Requests that the configured providers delete an object from cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        public static Task<BurcatException?> RelayDecoupleAsync<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers delete a Burcat instance from cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayDecouple(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Requests that the configured providers delete an object from cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        public static BurcatException? RelayDecouple<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an explicit cache delete request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static async Task<BurcatException?> SendDecoupleAsync(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null)
+        {
+            if (instance.Value is null) throw new InvalidOperationException("Cannot decouple a null object.");
+            else
+            {
+                SemaphoreSlim? semaphore = null;
+
+                try
+                {
+                    CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
+                    semaphore = await TryWaitSemaphore(head.Stream, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginDecoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatHead otherHead = await ExchangeHead(head.Stream, head.Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await SendObject(head.Stream, instance, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatException? result = (await RecieveObject(head.Stream, otherHead, cancellation)).ForceValue<BurcatException?>();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<EndDecoupleSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return result;
+                }
+                finally { semaphore?.Release(); }
+            }
         }
 
         /// <summary>
@@ -758,34 +900,53 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to decouple.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
-        public static BurcatException? SendDecouple<T>(IdentifiedStream stream, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(stream, objectBDP, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> SendDecoupleAsync<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(head, BurcatInstance.Build(objectBDP), token);
 
-        private static async Task<ActionResult> RelayActionAsync(Guid? streamID, BurcatInstance instance, string action, object?[]? parameters, bool ignoreInternal, CancellationToken? token)
+        /// <summary>
+        /// Sends an explicit cache delete request for a Burcat instance to another application.
+        /// </summary>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? SendDecouple(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null) => SendDecoupleAsync(head, instance, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Sends an explicit cache delete request to another application.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="stream">The stream connected to the remote application.</param>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
+        public static BurcatException? SendDecouple<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(head, objectBDP, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Executes an action through the configured providers.
+        /// </summary>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
+        public static async Task<ActionResult> RelayActionAsync(BurcatBoradcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null)
         {
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
 
-                ActionResult result = ignoreInternal ? ActionResult.Unsuccessful : InternalProvider.ExecuteAction(streamID, instance.Type, instance.Value, action, parameters);
+                ActionResult result = ignoreInternal ? ActionResult.Unsuccessful : InternalProvider.ExecuteAction(head, instance.Type, instance.Value, action, parameters);
                 cancellation.ThrowIfCancellationRequested();
 
-                if (!result.SuccessfulExecution && ExternalProvider is not null) result = await ExternalProvider.ExecuteAction(streamID, instance.Type, instance.Value, action, parameters, cancellation);
+                if (!result.SuccessfulExecution && ExternalProvider is not null) result = await ExternalProvider.ExecuteAction(head, instance.Type, instance.Value, action, parameters, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
                 return result;
             }
         }
-        /// <summary>
-        /// Executes an action through the configured providers.
-        /// </summary>
-        /// <param name="instance">The target instance or type-level action target.</param>
-        /// <param name="action">The protocol-visible action name.</param>
-        /// <param name="parameters">The action parameters.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(null, instance, action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes an instance action through the configured providers.
@@ -797,7 +958,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, new(objectBDP), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(BurcatBoradcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, new(objectBDP), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes a type-level action through the configured providers.
@@ -808,7 +969,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(null, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(BurcatBoradcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes an action through the configured providers.
@@ -819,7 +980,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction(BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
+        public static ActionResult RelayAction(BurcatBoradcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(head, instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Executes an instance action through the configured providers.
@@ -831,7 +992,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction<T>(T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(new(objectBDP), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(BurcatBoradcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, new(objectBDP), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes a type-level action through the configured providers.
@@ -842,7 +1003,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction<T>(string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(BurcatBoradcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
 
         /// <summary>
@@ -854,62 +1015,68 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static async Task<ActionResult> SendActionAsync(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null)
+        public static async Task<ActionResult> SendActionAsync(BurcatDirectionalHead head, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null)
         {
             IBurcatObject?[] burcatParameters = BurcatTranslator.ObjectsTranslate(parameters);
 
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
+                SemaphoreSlim? semaphore = null;
+
                 try
                 {
                     CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                    if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                    await stream.WriteAsync(GetClassIdentity<BeginActionSchematic>().ToByteArray(), cancellation);
+                    semaphore = await TryWaitSemaphore(head.Stream, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(stream.Identifier.ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<BeginActionSchematic>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), cancellation);
+                    BurcatHead otherHead = await ExchangeHead(head.Stream, head.Headers, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, instance, cancellation);
+                    await SendObject(head.Stream, instance, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<ActionScheme>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<ActionScheme>().ToByteArray(), cancellation);
                     byte[] actionData = Encoding.Unicode.GetBytes(action);
-                    await stream.WriteAsync(BitConverter.GetBytes(actionData.Length), cancellation);
-                    await stream.WriteAsync(actionData, cancellation);
-                    await stream.WriteAsync(GetClassIdentity<ActionScheme>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(BitConverter.GetBytes(actionData.Length), cancellation);
+                    await head.Stream.WriteAsync(actionData, cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<ActionScheme>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<ParameterScheme>().ToByteArray(), cancellation);
-                    await stream.WriteAsync(BitConverter.GetBytes(burcatParameters.Length), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<ParameterScheme>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(BitConverter.GetBytes(burcatParameters.Length), cancellation);
                     foreach (IBurcatObject? parameter in burcatParameters)
                     {
                         cancellation.ThrowIfCancellationRequested();
 
-                        if (parameter is null) await SendObject(stream, NothingChart.Instance, cancellation);
-                        else await SendObject(stream, new(parameter), cancellation);
+                        if (parameter is null) await SendObject(head.Stream, NothingChart.Instance, cancellation);
+                        else await SendObject(head.Stream, new(parameter), cancellation);
 
                         cancellation.ThrowIfCancellationRequested();
                     }
-                    await stream.WriteAsync(GetClassIdentity<ParameterScheme>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<ParameterScheme>().ToByteArray(), cancellation);
 
-                    ActionResult result = (await RecieveObject(stream, cancellation)).ForceValue<ActionResult>();
+                    ActionResult result = (await RecieveObject(head.Stream, otherHead, cancellation)).ForceValue<ActionResult>();
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<EndActionSchematic>().ToByteArray(), cancellation);
+                    await head.Stream.WriteAsync(GetClassIdentity<EndActionSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     return result;
                 }
-                finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+                finally { semaphore?.Release(); }
             }
         }
 
@@ -923,7 +1090,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, new(objectBDP), action, parameters, token);
+        public static Task<ActionResult> SendActionAsync<T>(BurcatDirectionalHead head, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(head, new(objectBDP), action, parameters, token);
 
         /// <summary>
         /// Sends a type-level action request to another application through a stream.
@@ -934,7 +1101,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static Task<ActionResult> SendActionAsync<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(stream, BurcatInstance.Build<T>(), action, parameters, token);
+        public static Task<ActionResult> SendActionAsync<T>(BurcatDirectionalHead head, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendActionAsync(head, BurcatInstance.Build<T>(), action, parameters, token);
 
         /// <summary>
         /// Sends an action request to another application through a stream.
@@ -945,7 +1112,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static ActionResult SendAction(IdentifiedStream stream, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null) => SendActionAsync(stream, instance, action, parameters, token).GetAwaiter().GetResult();
+        public static ActionResult SendAction(BurcatDirectionalHead head, BurcatInstance instance, string action, object?[]? parameters = null, CancellationToken? token = null) => SendActionAsync(head, instance, action, parameters, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an instance action request to another application through a stream.
@@ -957,7 +1124,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static ActionResult SendAction<T>(IdentifiedStream stream, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, new(objectBDP), action, parameters, token);
+        public static ActionResult SendAction<T>(BurcatDirectionalHead head, T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(head, new(objectBDP), action, parameters, token);
 
         /// <summary>
         /// Sends a type-level action request to another application through a stream.
@@ -968,17 +1135,7 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result returned by the remote application.</returns>
-        public static ActionResult SendAction<T>(IdentifiedStream stream, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(stream, BurcatInstance.Build<T>(), action, parameters, token);
-
-        /// <summary>
-        /// Gets or sets the provider used for local object construction, lookup, cache updates, deletes, and actions.
-        /// </summary>
-        public static IInternalProvider InternalProvider { get; set; } = new NothingProvider();
-
-        /// <summary>
-        /// Gets or sets the provider used to forward object operations to an external source.
-        /// </summary>
-        public static IExternalProvider? ExternalProvider { get; set; }
+        public static ActionResult SendAction<T>(BurcatDirectionalHead head, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => SendAction(head, BurcatInstance.Build<T>(), action, parameters, token);
 
         /// <summary>
         /// Receives and processes the next Burcat protocol exchange from a stream.
@@ -986,73 +1143,122 @@ namespace BurcatProtocol
         /// <param name="stream">The source stream.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The result of the received exchange.</returns>
-        public static async Task<ExchangeResult> ReceiveAsync(IdentifiedStream stream, CancellationToken? token = null)
+        public static async Task<ExchangeResult> ReceiveAsync(BurcatDirectionalHead head, CancellationToken? token = null)
         {
+            SemaphoreSlim? semaphore = null;
+
             try
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                if (ControlAsyncAccess) await Semaphores.GetOrAdd(stream.Identifier, new SemaphoreSlim(1, 1)).WaitAsync(cancellation);
-
-                Guid scheme = await RecieveScheme(stream, cancellation);
+                semaphore = await TryWaitSemaphore(head.Stream, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
-                if (scheme == GetClassIdentity<BeginObjectSchematic>())
+                if (!await RecieveScheme<BeginCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<BeginCommunicationSchematic>()}, but data read doesn't correspond to");
+                cancellation.ThrowIfCancellationRequested();
+
+                Guid scheme = await RecieveScheme(head.Stream, cancellation);
+                cancellation.ThrowIfCancellationRequested();
+
+                if (scheme == GetClassIdentity<BeginIdentitiesSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, head.Headers, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
+                    BurcatIdentitySet identities = InternalProvider.GetIdentities(otherHead.StreamID);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    await SendObject(head.Stream, identities, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatInstance instance = await RecieveObject(stream, cancellation);
+                    if (!await RecieveScheme<EndIdentitiesSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndIdentitiesSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<EndObjectSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectSchematic>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return new(BurcatExchangeType.Identities, BurcatInstance.Build<NothingChart>(), new(identities));
+                }
+                else if (scheme == GetClassIdentity<BeginHeadersSchematic>())
+                {
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatHeaderSet headers = InternalProvider.GetHeaders(otherHead.StreamID);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await SendObject(head.Stream, headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndHeadersSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndHeadersSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
+                    cancellation.ThrowIfCancellationRequested();
+
+                    return new(BurcatExchangeType.Headers, BurcatInstance.Build<NothingChart>(), new(headers));
+                }
+                else if (scheme == GetClassIdentity<BeginObjectSchematic>())
+                {
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    BurcatInstance instance = await RecieveObject(head.Stream, otherHead, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndObjectSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     return new(BurcatExchangeType.Object, instance);
                 }
                 else if (scheme == GetClassIdentity<BeginRevisionRequestSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
+                    await head.Stream.ReadExactlyAsync(guid, cancellation); Guid classID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    await head.Stream.ReadExactlyAsync(guid, cancellation); Guid objectID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid classID = new(guid);
+                    Guid revision = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? await RelayRevisionRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation) : Guid.Empty;
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid objectID = new(guid);
+                    await head.Stream.WriteAsync(GetClassIdentity<RevisionScheme>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    await head.Stream.WriteAsync(revision.ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    Guid revision = AcceptedClasses.TryGetValue(classID, out Type? objectType) ? await RelayRevisionRequestAsync(streamID, classID, objectID, false, cancellation) : Guid.Empty;
+                    await head.Stream.WriteAsync(GetClassIdentity<RevisionScheme>().ToByteArray(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<RevisionScheme>().ToByteArray(), cancellation);
+                    if (!await RecieveScheme<EndRevisionRequestSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(revision.ToByteArray(), cancellation);
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.WriteAsync(GetClassIdentity<RevisionScheme>().ToByteArray(), cancellation);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<EndRevisionRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
@@ -1060,164 +1266,161 @@ namespace BurcatProtocol
                 }
                 else if(scheme == GetClassIdentity<BeginObjectRequestSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
+                    await head.Stream.ReadExactlyAsync(guid, cancellation); Guid classID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    await head.Stream.ReadExactlyAsync(guid, cancellation); Guid objectID = new(guid);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid classID = new(guid);
+                    BurcatInstance instance = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingChart>();
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid objectID = new(guid);
+                    await SendObject(head.Stream, instance, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<VersionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<EndObjectRequestSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatInstance instance = AcceptedClasses.TryGetValue(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(streamID, classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingChart>();
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, instance, cancellation);
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<EndObjectRequestSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectRequestSchematic>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (objectType is null) return new(BurcatExchangeType.RevisionRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
-                    else return new(BurcatExchangeType.RevisionRequest, new(objectType), instance);
+                    if (objectType is null) return new(BurcatExchangeType.ObjectRequest, BurcatInstance.Build(new UnsupportedBurcatObjectException()));
+                    else return new(BurcatExchangeType.ObjectRequest, new(objectType), instance);
                 }
                 else if (scheme == GetClassIdentity<BeginCoupleSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    BurcatInstance instance = await RecieveObject(stream, cancellation);
+                    BurcatInstance instance = await RecieveObject(head.Stream, otherHead, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? coupleException = await RelayCoupleAsync(streamID, reference, false, cancellation);
+                    BurcatException? coupleException = await RelayCoupleAsync(new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, coupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
+                    await SendObject(head.Stream, coupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<EndCoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCoupleSchematic>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<EndCoupleSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCoupleSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     return new(BurcatExchangeType.Couple, instance, BurcatInstance.Build(coupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginDecoupleSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    BurcatInstance instance = await RecieveObject(stream, cancellation);
+                    BurcatInstance instance = await RecieveObject(head.Stream, otherHead, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? decoupleException = await RelayDecoupleAsync(streamID, reference, false, cancellation);
+                    BurcatException? decoupleException = await RelayDecoupleAsync(new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, decoupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
+                    await SendObject(head.Stream, decoupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<EndDecoupleSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndDecoupleSchematic>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<EndDecoupleSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndDecoupleSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     return new(BurcatExchangeType.Decouple, instance, BurcatInstance.Build(decoupleException));
                 }
                 else if (scheme == GetClassIdentity<BeginActionSchematic>())
                 {
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
+                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    byte[] guid = new byte[16];
-                    await stream.ReadExactlyAsync(guid, cancellation); Guid streamID = new(guid);
+                    BurcatInstance instance = await RecieveObject(head.Stream, otherHead, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<StreamScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    BurcatInstance instance = await RecieveObject(stream, cancellation);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<ActionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ActionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<ActionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ActionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
                     byte[] length = new byte[4];
-                    await stream.ReadExactlyAsync(length, cancellation);
+                    await head.Stream.ReadExactlyAsync(length, cancellation);
                     cancellation.ThrowIfCancellationRequested();
                     byte[] data = new byte[BitConverter.ToInt32(length)];
-                    await stream.ReadExactlyAsync(data, cancellation);
+                    await head.Stream.ReadExactlyAsync(data, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<ActionScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ActionScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<ActionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ActionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<ParameterScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ParameterScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<ParameterScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ParameterScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    await stream.ReadExactlyAsync(length, cancellation);
+                    await head.Stream.ReadExactlyAsync(length, cancellation);
                     IBurcatObject?[] parameters = new IBurcatObject?[BitConverter.ToInt32(length)];
                     for (int j = 0; j < parameters.Length; j++)
                     {
                         cancellation.ThrowIfCancellationRequested();
-                        parameters[j] = (await RecieveObject(stream, cancellation)).Value;
+                        parameters[j] = (await RecieveObject(head.Stream, otherHead, cancellation)).Value;
                         cancellation.ThrowIfCancellationRequested();
                     }
-                    if (!await RecieveScheme<ParameterScheme>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ParameterScheme>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<ParameterScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ParameterScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    ActionResult result = await RelayActionAsync(streamID, instance, Encoding.Unicode.GetString(data), parameters, false, cancellation);
+                    ActionResult result = await RelayActionAsync(new(otherHead.Headers), instance, Encoding.Unicode.GetString(data), parameters, false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    await SendObject(stream, result, cancellation);
+                    await SendObject(head.Stream, result, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
-                    if (!await RecieveScheme<EndActionSchematic>(stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndActionSchematic>()}, but data read doesn't correspond to");
+                    if (!await RecieveScheme<EndActionSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndActionSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
+                    cancellation.ThrowIfCancellationRequested();
+
+                    await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
                     return new(BurcatExchangeType.Action, instance, BurcatInstance.Build(result), Encoding.Unicode.GetString(data), parameters);
                 }
                 else throw new InvalidDataException("No supported scheme");
             }
-            finally { if (Semaphores.TryGetValue(stream.Identifier, out SemaphoreSlim? semaphore)) semaphore.Release(); }
+            finally { semaphore?.Release(); }
         }
         /// <summary>
         /// Receives and processes the next Burcat protocol exchange from a stream.
         /// </summary>
-        /// <param name="stream">The source stream.</param>
+        /// <param name="head">The source stream.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The result of the received exchange.</returns>
-        public static ExchangeResult Receive(IdentifiedStream stream, CancellationToken? token = null) => ReceiveAsync(stream, token).GetAwaiter().GetResult();
+        public static ExchangeResult Receive(BurcatDirectionalHead head, CancellationToken? token = null) => ReceiveAsync(head, token).GetAwaiter().GetResult();
 
-        private static async Task SendObject(IdentifiedStream stream, BurcatInstance instance, CancellationToken token)
+        private static async Task<BurcatHead> ExchangeHead(IdentifiedStream stream, BurcatHeaderSet headers, CancellationToken token)
         {
             await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), token);
             token.ThrowIfCancellationRequested();
@@ -1228,6 +1431,172 @@ namespace BurcatProtocol
             await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), token);
             token.ThrowIfCancellationRequested();
 
+            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
+            token.ThrowIfCancellationRequested();
+
+            byte[] guid = new byte[16];
+            await stream.ReadExactlyAsync(guid, token); Guid otherStreamID = new(guid);
+            token.ThrowIfCancellationRequested();
+
+            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
+            token.ThrowIfCancellationRequested();
+
+            if (headers is not null)
+            {
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), token);
+                token.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(BitConverter.GetBytes(headers.Count), token);
+                token.ThrowIfCancellationRequested();
+
+                foreach (BurcatHeader header in headers)
+                {
+                    await stream.WriteAsync(header.Package.ToByteArray(), token);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(BitConverter.GetBytes(header.Name.Length), token);
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes(header.Name), token);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(BitConverter.GetBytes(header.Value?.Length ?? -1), token);
+                    if (header.Value is not null) await stream.WriteAsync(Encoding.UTF8.GetBytes(header.Value), token);
+                    token.ThrowIfCancellationRequested();
+                }
+
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), token);
+                token.ThrowIfCancellationRequested();
+
+                if (!await RecieveScheme<HeadersScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<HeadersScheme>()}, but data read doesn't correspond to");
+                token.ThrowIfCancellationRequested();
+
+                byte[] length = new byte[4];
+                await stream.ReadExactlyAsync(length, token);
+                token.ThrowIfCancellationRequested();
+
+                headers = [];
+                int headerCount = BitConverter.ToInt32(length);
+                for (int i = 0; i < headerCount; i++)
+                {
+                    await stream.ReadExactlyAsync(guid, token); Guid package = new(guid);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.ReadExactlyAsync(length, token);
+                    token.ThrowIfCancellationRequested();
+
+                    byte[] variable = new byte[BitConverter.ToInt32(length)];
+                    await stream.ReadExactlyAsync(variable, token); string name = Encoding.UTF8.GetString(variable);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.ReadExactlyAsync(length, token); int valueLength = BitConverter.ToInt32(length);
+                    token.ThrowIfCancellationRequested();
+
+                    string? value = null;
+                    if (valueLength >= 0)
+                    {
+                        variable = new byte[valueLength];
+                        await stream.ReadExactlyAsync(variable, token); value = Encoding.UTF8.GetString(variable);
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    headers.Add(new(package, name, value));
+                }
+
+                if (!await RecieveScheme<HeadersScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<HeadersScheme>()}, but data read doesn't correspond to");
+                token.ThrowIfCancellationRequested();
+            }
+
+            return new(otherStreamID, headers ?? []);
+        }
+        private static async Task<BurcatHead> InverseExchangeHead(IdentifiedStream stream, BurcatHeaderSet headers, CancellationToken token)
+        {
+            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
+            token.ThrowIfCancellationRequested();
+
+            byte[] guid = new byte[16];
+            await stream.ReadExactlyAsync(guid, token); Guid otherStreamID = new(guid);
+            token.ThrowIfCancellationRequested();
+
+            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<StreamScheme>()}, but data read doesn't correspond to");
+            token.ThrowIfCancellationRequested();
+
+            await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), token);
+            token.ThrowIfCancellationRequested();
+
+            await stream.WriteAsync(stream.Identifier.ToByteArray(), token);
+            token.ThrowIfCancellationRequested();
+
+            await stream.WriteAsync(GetClassIdentity<StreamScheme>().ToByteArray(), token);
+            token.ThrowIfCancellationRequested();
+
+            if (headers is not null)
+            {
+                if (!await RecieveScheme<HeadersScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<HeadersScheme>()}, but data read doesn't correspond to");
+                token.ThrowIfCancellationRequested();
+
+                byte[] length = new byte[4];
+                await stream.ReadExactlyAsync(length, token);
+                token.ThrowIfCancellationRequested();
+
+                headers = [];
+                int headerCount = BitConverter.ToInt32(length);
+                for (int i = 0; i < headerCount; i++)
+                {
+                    await stream.ReadExactlyAsync(guid, token); Guid package = new(guid);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.ReadExactlyAsync(length, token);
+                    token.ThrowIfCancellationRequested();
+
+                    byte[] variable = new byte[BitConverter.ToInt32(length)];
+                    await stream.ReadExactlyAsync(variable, token); string name = Encoding.UTF8.GetString(variable);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.ReadExactlyAsync(length, token); int valueLength = BitConverter.ToInt32(length);
+                    token.ThrowIfCancellationRequested();
+
+                    string? value = null;
+                    if (valueLength >= 0)
+                    {
+                        variable = new byte[valueLength];
+                        await stream.ReadExactlyAsync(variable, token); value = Encoding.UTF8.GetString(variable);
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    headers.Add(new(package, name, value));
+                }
+
+                if (!await RecieveScheme<HeadersScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<HeadersScheme>()}, but data read doesn't correspond to");
+                token.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), token);
+                token.ThrowIfCancellationRequested();
+
+                await stream.WriteAsync(BitConverter.GetBytes(headers.Count), token);
+                token.ThrowIfCancellationRequested();
+
+                foreach (BurcatHeader header in headers)
+                {
+                    await stream.WriteAsync(header.Package.ToByteArray(), token);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(BitConverter.GetBytes(header.Name.Length), token);
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes(header.Name), token);
+                    token.ThrowIfCancellationRequested();
+
+                    await stream.WriteAsync(BitConverter.GetBytes(header.Value?.Length ?? -1), token);
+                    if (header.Value is not null) await stream.WriteAsync(Encoding.UTF8.GetBytes(header.Value), token);
+                    token.ThrowIfCancellationRequested();
+                }
+
+                await stream.WriteAsync(GetClassIdentity<HeadersScheme>().ToByteArray(), token);
+                token.ThrowIfCancellationRequested();
+            }
+
+            return new(otherStreamID, headers ?? []);
+        }
+
+        private static async Task SendObject(IdentifiedStream stream, BurcatInstance instance, CancellationToken token)
+        {
             await stream.WriteAsync(GetClassIdentity<VersionScheme>().ToByteArray(), token);
             token.ThrowIfCancellationRequested();
 
@@ -1330,21 +1699,12 @@ namespace BurcatProtocol
         }
         private static async Task<bool> RecieveScheme<T>(IdentifiedStream stream, CancellationToken token) => await RecieveScheme(stream, token) == GetClassIdentity<T>();
 
-        private static async Task<BurcatInstance> RecieveObject(IdentifiedStream stream, CancellationToken token)
+        private static async Task<BurcatInstance> RecieveObject(IdentifiedStream stream, BurcatHead otherHead, CancellationToken token)
         {
-            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
-            token.ThrowIfCancellationRequested();
-
-            byte[] guid = new byte[16];
-            await stream.ReadExactlyAsync(guid, token); Guid streamID = new(guid);
-            token.ThrowIfCancellationRequested();
-
-            if (!await RecieveScheme<StreamScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
-            token.ThrowIfCancellationRequested();
-
             if (!await RecieveScheme<VersionScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
             token.ThrowIfCancellationRequested();
 
+            byte[] guid = new byte[16];
             await stream.ReadExactlyAsync(guid, token); Guid classID = new(guid);
             token.ThrowIfCancellationRequested();
 
@@ -1354,7 +1714,7 @@ namespace BurcatProtocol
             if (!await RecieveScheme<VersionScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
             token.ThrowIfCancellationRequested();
 
-            if (AcceptedClasses.TryGetValue(classID, out Type? referenceType))
+            if (AcceptedIdentities.TryGetType(classID, out Type? referenceType))
             {
                 if (objectID == Guid.AllBitsSet) return new(referenceType, null);
                 else
@@ -1393,8 +1753,8 @@ namespace BurcatProtocol
                             if (!await RecieveScheme<RevisionScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<RevisionScheme>()}, but data read doesn't correspond to");
                             token.ThrowIfCancellationRequested();
 
-                            reference = InternalProvider.GetObject(streamID, referenceType, objectID) is IBurcatObject objectInternal && objectInternal.Revision == revisionID ? objectInternal : null;
-                            if (reference is null && ExternalProvider is not null) reference = (await ExternalProvider.GetObject(streamID, referenceType, objectID, token)) is IBurcatObject objectExternal && objectExternal.Revision == revisionID ? objectExternal : null;
+                            reference = InternalProvider.GetObject(otherHead, referenceType, objectID) is IBurcatObject objectInternal && objectInternal.Revision == revisionID ? objectInternal : null;
+                            if (reference is null && ExternalProvider is not null) reference = (await ExternalProvider.GetObject(new(otherHead.Headers), referenceType, objectID, token)) is IBurcatObject objectExternal && objectExternal.Revision == revisionID ? objectExternal : null;
                         }
                         else reference = null;
 
@@ -1418,7 +1778,7 @@ namespace BurcatProtocol
                             for (int i = 0; i < fieldValues.Length; i++)
                             {
                                 token.ThrowIfCancellationRequested();
-                                fieldValues[i] = (await RecieveObject(stream, token)).ForceValue<BurcatField>();
+                                fieldValues[i] = (await RecieveObject(stream, otherHead, token)).ForceValue<BurcatField>();
                                 token.ThrowIfCancellationRequested();
                             }
                             if (!await RecieveScheme<FieldScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<FieldScheme>()}, but data read doesn't correspond to");
@@ -1429,15 +1789,15 @@ namespace BurcatProtocol
                             for (int i = 0; i < constructorValues.Length; i++)
                             {
                                 token.ThrowIfCancellationRequested();
-                                constructorValues[i] = (await RecieveObject(stream, token)).Value;
+                                constructorValues[i] = (await RecieveObject(stream, otherHead, token)).Value;
                                 token.ThrowIfCancellationRequested();
                             }
                             if (!await RecieveScheme<ConstructorScheme>(stream, token)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ConstructorScheme>()}, but data read doesn't correspond to");
 
-                            reference = InternalProvider.ConstructObject(streamID, referenceType, objectID, revisionID, constructorValues, fieldValues);
+                            reference = InternalProvider.ConstructObject(otherHead, referenceType, objectID, revisionID, constructorValues, fieldValues);
                             token.ThrowIfCancellationRequested();
 
-                            if (reference is not null && objectID != Guid.Empty) InternalProvider.CoupleCache(streamID, reference, false);
+                            if (reference is not null && objectID != Guid.Empty) InternalProvider.CoupleCache(otherHead, reference, false);
                         }
                         else
                         {
@@ -1462,6 +1822,18 @@ namespace BurcatProtocol
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
         }
 
+        private async static Task<SemaphoreSlim?> TryWaitSemaphore(IdentifiedStream stream, CancellationToken token)
+        {
+            if (ControlAsyncAccess)
+            {
+                SemaphoreSlim candidate = Semaphores.GetOrAdd(stream.Identifier, static _ => new SemaphoreSlim(1, 1));
+                await candidate.WaitAsync(token);
+                return candidate;
+            }
+            else return null;
+        }
+
+
         private abstract class Scheme : IBurcatObject
         {
             Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
@@ -1474,49 +1846,67 @@ namespace BurcatProtocol
         [BurcatIdentity("00000000-0000-0000-0000-000000000001")]
         private sealed class StreamScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000002")]
-        private sealed class VersionScheme : Scheme { }
+        private sealed class HeadersScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000003")]
-        private sealed class RevisionScheme : Scheme { }
+        private sealed class VersionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000004")]
-        private sealed class RawScheme : Scheme { }
+        private sealed class RevisionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000005")]
-        private sealed class RefinedScheme : Scheme { }
+        private sealed class RawScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000006")]
-        private sealed class InstanceScheme : Scheme { }
+        private sealed class RefinedScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000007")]
-        private sealed class FieldScheme : Scheme { }
+        private sealed class InstanceScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000008")]
-        private sealed class ConstructorScheme : Scheme { }
+        private sealed class FieldScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000009")]
-        private sealed class ActionScheme : Scheme { }
+        private sealed class ConstructorScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000010")]
-        private sealed class ParameterScheme : Scheme { }
+        private sealed class ActionScheme : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000000011")]
+        private sealed class ParameterScheme : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000000012")]
         private sealed class FieldUpdateScheme : Scheme { }
 
-        [BurcatIdentity("00000000-0000-0000-0000-000000000100")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001000")]
+        private sealed class BeginCommunicationSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001100")]
+        private sealed class EndCommunicationSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001001")]
+        private sealed class BeginIdentitiesSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001101")]
+        private sealed class EndIdentitiesSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001002")]
+        private sealed class BeginHeadersSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001102")]
+        private sealed class EndHeadersSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001003")]
         private sealed class BeginObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000110")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001103")]
         private sealed class EndObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000101")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001004")]
         private sealed class BeginRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000111")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001104")]
         private sealed class EndRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000102")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001005")]
         private sealed class BeginObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000112")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001105")]
         private sealed class EndObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000103")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001006")]
         private sealed class BeginActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000113")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001106")]
         private sealed class EndActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000104")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001007")]
         private sealed class BeginCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000114")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001107")]
         private sealed class EndCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000105")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001008")]
         private sealed class BeginDecoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000000115")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001108")]
         private sealed class EndDecoupleSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001009")]
+        private sealed class BeginUpgradeSchematic : Scheme { }
+        [BurcatIdentity("00000000-0000-0000-0000-000000001109")]
+        private sealed class EndUpgradeSchematic : Scheme { }
     }
 }

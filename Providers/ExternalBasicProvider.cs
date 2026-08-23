@@ -2,7 +2,7 @@
 namespace BurcatProtocol.Providers
 {
     /// <summary>
-    /// External provider that forwards every operation through one identified stream.
+    /// External provider that forwards every operation and its additional headers through one identified stream.
     /// </summary>
     public sealed class ExternalBasicProvider : IExternalProvider
     {
@@ -18,18 +18,24 @@ namespace BurcatProtocol.Providers
         public ExternalBasicProvider(IdentifiedStream stream) { Stream = stream; }
 
         /// <inheritdoc/>
-        public async Task<Guid> GetRevision(Guid? streamID, Type objectType, Guid objectID, CancellationToken token) => await BurcatChat.SendRevisionRequestAsync(Stream, BurcatChat.GetClassIdentity(objectType), objectID, token);
+        public Task<BurcatIdentitySet> GetIdentities(CancellationToken token) => BurcatChat.GetIdentitiesAsync(Stream, token);
 
         /// <inheritdoc/>
-        public async Task<IBurcatObject?> GetObject(Guid? streamID, Type objectType, Guid objectID, CancellationToken token) => await BurcatChat.SendObjectRequestAsync(Stream, BurcatChat.GetClassIdentity(objectType), objectID, token);
+        public Task<BurcatHeaderSet> GetHeaders(CancellationToken token) => BurcatChat.GetHeadersAsync(Stream, token);
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token) => await BurcatChat.SendCoupleAsync(Stream, objectBDP, token);
+        public Task<Guid> GetRevision(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token) => BurcatChat.SendRevisionRequestAsync(new(Stream, head.AdditionalHeaders), BurcatChat.GetClassIdentity(objectType), objectID, token);
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> DecoupleCache(Guid? streamID, IBurcatObject objectBDP, CancellationToken token) => await BurcatChat.SendDecoupleAsync(Stream, objectBDP, token);
+        public Task<IBurcatObject?> GetObject(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token) => BurcatChat.SendObjectRequestAsync(new(Stream, head.AdditionalHeaders), BurcatChat.GetClassIdentity(objectType), objectID, token);
 
         /// <inheritdoc/>
-        public Task<ActionResult> ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token) => BurcatChat.SendActionAsync(Stream, new(objectType, objectBDP), action, parameters, token);
+        public Task<BurcatException?> CoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token) => BurcatChat.SendCoupleAsync(new(Stream, head.AdditionalHeaders), objectBDP, token);
+
+        /// <inheritdoc/>
+        public Task<BurcatException?> DecoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, CancellationToken token) => BurcatChat.SendDecoupleAsync(new(Stream, head.AdditionalHeaders), objectBDP, token);
+
+        /// <inheritdoc/>
+        public Task<ActionResult> ExecuteAction(BurcatBoradcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token) => BurcatChat.SendActionAsync(new(Stream, head.AdditionalHeaders), new(objectType, objectBDP), action, parameters, token);
     }
 }

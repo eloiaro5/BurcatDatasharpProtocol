@@ -126,7 +126,8 @@ namespace BurcatProtocol
             }
         }
 
-        private static SortedSet<GuidList> InCache { get; } = [];
+        private static ConcurrentDictionary<GuidList, byte> InCache { get; } = [];
+        private static object CacheLock { get; } = new();
 
         /// <summary>
         /// Discovers and caches all public Burcat-invokable members for a type.
@@ -138,22 +139,25 @@ namespace BurcatProtocol
         public static void AddToCache(Type objectType)
         {
             GuidList guid = GuidList.FromType(objectType);
-            if (!InCache.Contains(guid))
-            {
-                foreach (FieldInfo info in objectType.GetFields(PublicFieldsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
-                foreach (PropertyInfo info in objectType.GetProperties(PublicFieldsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
-                if (objectType.IsValueType || (objectType.IsClass && !objectType.IsAbstract)) foreach (ConstructorInfo info in objectType.GetConstructors(PublicConstructorsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
-                foreach (MethodInfo info in objectType.GetMethods(PublicMehodsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
+            if (!InCache.ContainsKey(guid))
+                lock (CacheLock)
+                    if (!InCache.ContainsKey(guid))
+                    {
+                        foreach (FieldInfo info in objectType.GetFields(PublicFieldsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
+                        foreach (PropertyInfo info in objectType.GetProperties(PublicFieldsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
+                        if (objectType.IsValueType || (objectType.IsClass && !objectType.IsAbstract)) foreach (ConstructorInfo info in objectType.GetConstructors(PublicConstructorsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
+                        foreach (MethodInfo info in objectType.GetMethods(PublicMehodsFlags).Where(f => f.GetCustomAttribute<NotBurcatInvokableAttribute>() is null)) AddToCache(objectType, info);
 
-                InCache.Add(guid);
-            }
+                        InCache.TryAdd(guid, 0);
+                    }
         }
 
         /// <summary>
         /// Checks whether a type has already been scanned into the cache.
         /// </summary>
         /// <param name="objectType">The type to check.</param>
-        public static void IsInCache(Type objectType) => InCache.Contains(GuidList.FromType(objectType));
+        /// <returns><see langword="true"/> when type has already been scanned; otherwise, <see langword="false"/>.</returns>
+        public static bool IsInCache(Type objectType) => InCache.ContainsKey(GuidList.FromType(objectType));
 
         /// <summary>
         /// Gets the cached readable fields and properties for a Burcat object.
@@ -595,7 +599,12 @@ namespace BurcatProtocol
                 else return false;
             }
 
-            public override int GetHashCode() => Parameters.GetHashCode();
+            public override int GetHashCode()
+            {
+                HashCode hash = new();
+                foreach (ParameterInfo parameter in Parameters) hash.Add(parameter.ParameterType);
+                return hash.ToHashCode();
+            }
 
             public ActionResult TryDirectInvoke(IBurcatObject? target, IBurcatObject?[] parameters)
             {
@@ -691,7 +700,7 @@ namespace BurcatProtocol
                     if (classComparation == 0)
                     {
                         int methodComparation = MethodGuid.CompareTo(other.MethodGuid);
-                        if (classComparation == 0) return Name.CompareTo(other.Name);
+                        if (methodComparation == 0) return Name.CompareTo(other.Name);
                         else return methodComparation;
                     }
                     else return classComparation;

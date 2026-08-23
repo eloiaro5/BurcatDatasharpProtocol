@@ -6,7 +6,7 @@ using System.Text;
 namespace BurcatProtocol.Providers
 {
     /// <summary>
-    /// Internal provider that fans operations out across a collection of internal providers.
+    /// Internal provider that unions stream capabilities and fans header-aware operations out across its providers.
     /// </summary>
     public sealed class InternalCollectionProvider : InternalProvider, ICollection<IInternalProvider>, IInternalProvider
     {
@@ -48,11 +48,33 @@ namespace BurcatProtocol.Providers
         public IEnumerator<IInternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
         /// <inheritdoc/>
-        public override Guid GetRevision(Guid? streamID, Type objectType, Guid objectID)
+        public override BurcatIdentitySet GetIdentities(Guid streamID)
+        {
+            BurcatIdentitySet result = [];
+            foreach (IInternalProvider provider in Providers)
+                foreach (BurcatIdentity header in provider.GetIdentities(streamID))
+                    result.Add(header);
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public override BurcatHeaderSet GetHeaders(Guid streamID)
+        {
+            BurcatHeaderSet result = [];
+            foreach (IInternalProvider provider in Providers)
+                foreach (BurcatHeader header in provider.GetHeaders(streamID))
+                    result.Add(header);
+
+            return result;
+        }
+
+        /// <inheritdoc/>
+        public override Guid GetRevision(BurcatHead head, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)
             {
-                Guid result = provider.GetRevision(streamID, objectType, objectID);
+                Guid result = provider.GetRevision(head, objectType, objectID);
                 if (result != Guid.Empty) return result;
             }
 
@@ -60,11 +82,11 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public override IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID)
+        public override IBurcatObject? GetObject(BurcatHead head, Type objectType, Guid objectID)
         {
             foreach (IInternalProvider provider in Providers)
             {
-                IBurcatObject? result = provider.GetObject(streamID, objectType, objectID);
+                IBurcatObject? result = provider.GetObject(head, objectType, objectID);
                 if (result is not null) return result;
             }
 
@@ -72,32 +94,32 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public override BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested)
+        public override BurcatException? CoupleCache(BurcatHead head, IBurcatObject objectBDP, bool explicitelyRequested)
         {
             foreach (IInternalProvider provider in Providers)
-                if (provider.CoupleCache(streamID, objectBDP, explicitelyRequested) is BurcatException exception)
+                if (provider.CoupleCache(head, objectBDP, explicitelyRequested) is BurcatException exception)
                     return exception;
 
             return null;
         }
 
         /// <inheritdoc/>
-        public override BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP)
+        public override BurcatException? DecoupleCache(BurcatHead head, IBurcatObject objectBDP)
         {
             foreach (IInternalProvider provider in Providers)
-                if (provider.DecoupleCache(streamID, objectBDP) is BurcatException exception)
+                if (provider.DecoupleCache(head, objectBDP) is BurcatException exception)
                     return exception;
 
             return null;
         }
 
         /// <inheritdoc/>
-        public override ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
+        public override ActionResult ExecuteAction(BurcatHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
             ActionResult result = ActionResult.Unsuccessful;
             foreach (IInternalProvider provider in Providers)
             {
-                result = provider.ExecuteAction(streamID, objectType, objectBDP, action, parameters);
+                result = provider.ExecuteAction(head, objectType, objectBDP, action, parameters);
                 if (result.Exception is not null) return result;
             }
 

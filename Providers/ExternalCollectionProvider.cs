@@ -6,7 +6,7 @@ using System.Text;
 namespace BurcatProtocol.Providers
 {
     /// <summary>
-    /// External provider that broadcasts operations across a collection of external providers.
+    /// External provider that forwards headers while broadcasting operations across its providers.
     /// </summary>
     public sealed class ExternalCollectionProvider : ICollection<IExternalProvider>, IExternalProvider
     {
@@ -48,13 +48,55 @@ namespace BurcatProtocol.Providers
         public IEnumerator<IExternalProvider> GetEnumerator() => Providers.GetEnumerator();
 
         /// <inheritdoc/>
-        public async Task<Guid> GetRevision(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
+        public async Task<BurcatIdentitySet> GetIdentities(CancellationToken token)
+        {
+            using IEnumerator<IExternalProvider> providers = Providers.GetEnumerator();
+            token.ThrowIfCancellationRequested();
+
+            if (providers.MoveNext())
+            {
+                BurcatIdentitySet result = [.. await providers.Current.GetIdentities(token)];
+                while (result.Count != 0 && providers.MoveNext())
+                {
+                    token.ThrowIfCancellationRequested();
+                    result.IntersectWith(await providers.Current.GetIdentities(token));
+                }
+
+                token.ThrowIfCancellationRequested();
+                return result;
+            }
+            else return [];
+        }
+
+        /// <inheritdoc/>
+        public async Task<BurcatHeaderSet> GetHeaders(CancellationToken token)
+        {
+            using IEnumerator<IExternalProvider> providers = Providers.GetEnumerator();
+            token.ThrowIfCancellationRequested();
+
+            if (providers.MoveNext())
+            {
+                BurcatHeaderSet result = [.. await providers.Current.GetHeaders(token)];
+                while (result.Count != 0 && providers.MoveNext())
+                {
+                    token.ThrowIfCancellationRequested();
+                    result.IntersectWith(await providers.Current.GetHeaders(token));
+                }
+
+                token.ThrowIfCancellationRequested();
+                return result;
+            }
+            else return [];
+        }
+
+        /// <inheritdoc/>
+        public async Task<Guid> GetRevision(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
 
-                Guid result = await provider.GetRevision(streamID, objectType, objectID, token);
+                Guid result = await provider.GetRevision(head, objectType, objectID, token);
                 if (result != Guid.Empty) return result;
 
                 token.ThrowIfCancellationRequested();
@@ -65,13 +107,13 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<IBurcatObject?> GetObject(Guid? streamID, Type objectType, Guid objectID, CancellationToken token)
+        public async Task<IBurcatObject?> GetObject(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
 
-                IBurcatObject? result = await provider.GetObject(streamID, objectType, objectID, token);
+                IBurcatObject? result = await provider.GetObject(head, objectType, objectID, token);
                 if (result is not null) return result;
 
                 token.ThrowIfCancellationRequested();
@@ -82,12 +124,12 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token)
+        public async Task<BurcatException?> CoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
-                if (await provider.CoupleCache(streamID, objectBDP, explicitelyRequested, token) is BurcatException exception)
+                if (await provider.CoupleCache(head, objectBDP, explicitelyRequested, token) is BurcatException exception)
                     return exception;
             }
 
@@ -96,12 +138,12 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> DecoupleCache(Guid? streamID, IBurcatObject objectBDP, CancellationToken token)
+        public async Task<BurcatException?> DecoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
-                if (await provider.DecoupleCache(streamID, objectBDP, token) is BurcatException exception)
+                if (await provider.DecoupleCache(head, objectBDP, token) is BurcatException exception)
                     return exception;
             }
 
@@ -110,14 +152,14 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<ActionResult> ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
+        public async Task<ActionResult> ExecuteAction(BurcatBoradcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
         {
             ActionResult result = ActionResult.Unsuccessful;
             foreach (IExternalProvider provider in Providers)
             {
                 token.ThrowIfCancellationRequested();
 
-                result = await provider.ExecuteAction(streamID, objectType, objectBDP, action, parameters, token);
+                result = await provider.ExecuteAction(head, objectType, objectBDP, action, parameters, token);
                 if (result.Exception is not null) return result;
 
                 token.ThrowIfCancellationRequested();
