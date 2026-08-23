@@ -13,7 +13,7 @@ namespace BurcatProtocol
     /// <remarks>
     /// Internal providers can construct objects, resolve object revisions and references,
     /// add or update cached objects, delete cached objects, and execute actions on them.
-    /// The optional <c>streamID</c> identifies the permission or communication session
+    /// The optional <c>head</c> identifies the permission or communication session
     /// that requested the operation; <see langword="null"/> means the operation was
     /// requested internally.
     /// </remarks>
@@ -22,22 +22,22 @@ namespace BurcatProtocol
         /// <summary>
         /// Gets the Burcat identities this provider supports for a communication session.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session.</param>
         /// <returns>The identities supported by the provider.</returns>
-        BurcatIdentitySet GetIdentities(Guid? streamID);
+        BurcatIdentitySet GetIdentities(Guid streamID);
 
         /// <summary>
         /// Gets the headers this provider can handle for a communication session.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session.</param>
         /// <returns>The headers supported by the provider.</returns>
-        BurcatHeaderSet GetHeaders(Guid? streamID);
+        BurcatHeaderSet GetHeaders(Guid streamID);
 
         /// <summary>
         /// Constructs a Burcat object, or returns <see langword="null"/> for a null object value.
         /// </summary>
-        /// <param name="streamID">
-        /// The optional permission or communication session that requested construction.
+        /// <param name="head">
+        /// The optional exchange head for the permission or communication session that requested construction.
         /// </param>
         /// <param name="objectType">The CLR type to construct.</param>
         /// <param name="objectID">The provider reference to assign to the constructed object.</param>
@@ -45,53 +45,53 @@ namespace BurcatProtocol
         /// <param name="parameters">The protocol values used as constructor arguments.</param>
         /// <param name="fields">The protocol fields to apply after construction.</param>
         /// <returns>The constructed nullable object, or <see langword="null"/> when no object can be constructed.</returns>
-        IBurcatObject? ConstructObject(Guid? streamID, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields);
+        IBurcatObject? ConstructObject(BurcatHead head, Type objectType, Guid objectID, Guid revisionID, IBurcatObject?[] parameters, BurcatField[] fields);
 
         /// <summary>
         /// Gets the revision of an object reference.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session that requested the revision.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session that requested the revision.</param>
         /// <param name="objectType">The CLR type of the referenced object.</param>
         /// <param name="objectID">The provider reference of the requested object.</param>
         /// <returns>
         /// The object's current revision, or <see cref="Guid.Empty"/> when the reference
         /// is unknown or has no available revision.
         /// </returns>
-        Guid GetRevision(Guid? streamID, Type objectType, Guid objectID);
+        Guid GetRevision(BurcatHead head, Type objectType, Guid objectID);
 
         /// <summary>
         /// Gets the latest available object for a reference.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session that requested the object.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session that requested the object.</param>
         /// <param name="objectType">The CLR type of the referenced object.</param>
         /// <param name="objectID">The provider reference of the requested object.</param>
         /// <returns>The referenced object, or <see langword="null"/> when it is not available.</returns>
-        IBurcatObject? GetObject(Guid? streamID, Type objectType, Guid objectID);
+        IBurcatObject? GetObject(BurcatHead head, Type objectType, Guid objectID);
 
         /// <summary>
         /// Tries to add or update an object in the provider's cache or backing store.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session that requested the operation.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session that requested the operation.</param>
         /// <param name="objectBDP">The object to add or update.</param>
         /// <param name="explicitelyRequested">
         /// <see langword="true"/> when the operation was explicitly requested by the caller;
         /// <see langword="false"/> when it is part of protocol synchronization.
         /// </param>
         /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
-        BurcatException? CoupleCache(Guid? streamID, IBurcatObject objectBDP, bool explicitelyRequested);
+        BurcatException? CoupleCache(BurcatHead head, IBurcatObject objectBDP, bool explicitelyRequested);
 
         /// <summary>
         /// Tries to delete an object from the provider's cache or backing store.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session that requested the operation.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session that requested the operation.</param>
         /// <param name="objectBDP">The object to remove.</param>
         /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
-        BurcatException? DecoupleCache(Guid? streamID, IBurcatObject objectBDP);
+        BurcatException? DecoupleCache(BurcatHead head, IBurcatObject objectBDP);
 
         /// <summary>
         /// Executes an action on an object or type and returns the action result.
         /// </summary>
-        /// <param name="streamID">The optional permission or communication session that requested the action.</param>
+        /// <param name="head">The optional exchange head for the permission or communication session that requested the action.</param>
         /// <param name="objectType">The CLR type that declares or receives the action.</param>
         /// <param name="objectBDP">
         /// The target object for instance actions, or <see langword="null"/> for static or type-level actions.
@@ -99,7 +99,7 @@ namespace BurcatProtocol
         /// <param name="action">The protocol-visible action name.</param>
         /// <param name="parameters">The CLR parameter values to translate and pass to the action.</param>
         /// <returns>The result of the action, including any exception produced by its execution.</returns>
-        ActionResult ExecuteAction(Guid? streamID, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters);
+        ActionResult ExecuteAction(BurcatHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters);
     }
 
     /// <summary>
