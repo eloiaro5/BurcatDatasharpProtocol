@@ -285,89 +285,6 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static void Purge(IdentifiedStream stream, CancellationToken? token = null) => PurgeAsync(stream, token).GetAwaiter().GetResult();
 
-
-        /// <summary>
-        /// Sends a Burcat instance through a stream.
-        /// </summary>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="instance">The instance metadata and value to send.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public async static Task SendAsync(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null)
-        {
-            SemaphoreSlim? semaphore = null;
-
-            try
-            {
-                CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
-                semaphore = await TryWaitSemaphore(head.Stream, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await head.Stream.WriteAsync(GetClassIdentity<BeginCommunicationSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await head.Stream.WriteAsync(GetClassIdentity<BeginObjectSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await ExchangeHead(head.Stream, head.Headers, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await SendObject(head.Stream, instance, cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await head.Stream.WriteAsync(GetClassIdentity<EndObjectSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await head.Stream.WriteAsync(GetClassIdentity<EndCommunicationSchematic>().ToByteArray(), cancellation);
-                cancellation.ThrowIfCancellationRequested();
-
-                await head.Stream.FlushAsync();
-                cancellation.ThrowIfCancellationRequested();
-            }
-            finally { semaphore?.Release(); }
-        }
-
-        /// <summary>
-        /// Sends a Burcat object through a stream.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="objectBDP">The object to send.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public static Task SendAsync<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, new(objectBDP), token);
-
-        /// <summary>
-        /// Sends a null Burcat object value for a type through a stream.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public static Task SendAsync<T>(BurcatDirectionalHead head, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, BurcatInstance.Build<T>(), token);
-
-        /// <summary>
-        /// Sends a Burcat instance through a stream.
-        /// </summary>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="instance">The instance metadata and value to send.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public static void Send(BurcatDirectionalHead head, BurcatInstance instance, CancellationToken? token = null) => SendAsync(head, instance, token).GetAwaiter().GetResult();
-
-        /// <summary>
-        /// Sends a Burcat object through a stream.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="objectBDP">The object to send.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public static void Send<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendAsync(head, objectBDP, token).GetAwaiter().GetResult();
-
-        /// <summary>
-        /// Sends a null Burcat object value for a type through a stream.
-        /// </summary> 
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="head">The destination stream and headers to send with the operation.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        public static void Send<T>(BurcatDirectionalHead head, CancellationToken? token = null) where T : IBurcatObject => SendAsync<T>(head, token).GetAwaiter().GetResult();
-
         /// <summary>
         /// Resolves the current revision for an object reference through the configured providers.
         /// </summary>
@@ -1055,7 +972,7 @@ namespace BurcatProtocol
                     {
                         cancellation.ThrowIfCancellationRequested();
 
-                        if (parameter is null) await SendObject(head.Stream, NothingChart.Instance, cancellation);
+                        if (parameter is null) await SendObject(head.Stream, NothingInstance.Instance, cancellation);
                         else await SendObject(head.Stream, new(parameter), cancellation);
 
                         cancellation.ThrowIfCancellationRequested();
@@ -1179,7 +1096,7 @@ namespace BurcatProtocol
                     await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
-                    return new(BurcatExchangeType.Identities, BurcatInstance.Build<NothingChart>(), new(identities));
+                    return new(BurcatExchangeType.Identities, BurcatInstance.Build<NothingInstance>(), new(identities));
                 }
                 else if (scheme == GetClassIdentity<BeginHeadersSchematic>())
                 {
@@ -1201,26 +1118,7 @@ namespace BurcatProtocol
                     await head.Stream.FlushAsync();
                     cancellation.ThrowIfCancellationRequested();
 
-                    return new(BurcatExchangeType.Headers, BurcatInstance.Build<NothingChart>(), new(headers));
-                }
-                else if (scheme == GetClassIdentity<BeginObjectSchematic>())
-                {
-                    BurcatHead otherHead = await InverseExchangeHead(head.Stream, Headers, cancellation);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    BurcatInstance instance = await RecieveObject(head.Stream, otherHead, cancellation);
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<EndObjectSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndObjectSchematic>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    if (!await RecieveScheme<EndCommunicationSchematic>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<EndCommunicationSchematic>()}, but data read doesn't correspond to");
-                    cancellation.ThrowIfCancellationRequested();
-
-                    await head.Stream.FlushAsync();
-                    cancellation.ThrowIfCancellationRequested();
-
-                    return new(BurcatExchangeType.Object, instance);
+                    return new(BurcatExchangeType.Headers, BurcatInstance.Build<NothingInstance>(), new(headers));
                 }
                 else if (scheme == GetClassIdentity<BeginRevisionRequestSchematic>())
                 {
@@ -1282,7 +1180,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatInstance instance = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingChart>();
+                    BurcatInstance instance = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingInstance>();
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(head.Stream, instance, cancellation);
@@ -1673,7 +1571,7 @@ namespace BurcatProtocol
                     {
                         token.ThrowIfCancellationRequested();
 
-                        if (value is null) await SendObject(stream, NothingChart.Instance, token);
+                        if (value is null) await SendObject(stream, NothingInstance.Instance, token);
                         else await SendObject(stream, new(value), token);
 
                         token.ThrowIfCancellationRequested();
@@ -1881,32 +1779,28 @@ namespace BurcatProtocol
         [BurcatIdentity("00000000-0000-0000-0000-000000001102")]
         private sealed class EndHeadersSchematic : Scheme { }
         [BurcatIdentity("00000000-0000-0000-0000-000000001003")]
-        private sealed class BeginObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001103")]
-        private sealed class EndObjectSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001004")]
         private sealed class BeginRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001104")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001103")]
         private sealed class EndRevisionRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001005")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001004")]
         private sealed class BeginObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001105")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001104")]
         private sealed class EndObjectRequestSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001006")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001005")]
         private sealed class BeginActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001106")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001105")]
         private sealed class EndActionSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001007")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001006")]
         private sealed class BeginCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001107")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001106")]
         private sealed class EndCoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001008")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001007")]
         private sealed class BeginDecoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001108")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001107")]
         private sealed class EndDecoupleSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001009")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001008")]
         private sealed class BeginUpgradeSchematic : Scheme { }
-        [BurcatIdentity("00000000-0000-0000-0000-000000001109")]
+        [BurcatIdentity("00000000-0000-0000-0000-000000001108")]
         private sealed class EndUpgradeSchematic : Scheme { }
     }
 }

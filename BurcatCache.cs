@@ -198,7 +198,7 @@ namespace BurcatProtocol
 
                     if (invokable)
                     {
-                        if (!validate || Validator.TryValidateValue(value, new ValidationContext(value ?? NothingChart.Instance) { MemberName = f.PublicName }, validations, f.Validations))
+                        if (!validate || Validator.TryValidateValue(value, new ValidationContext(value ?? NothingInstance.Instance) { MemberName = f.PublicName }, validations, f.Validations))
                         {
                             action(objectBDP, value);
                             return null;
@@ -273,7 +273,7 @@ namespace BurcatProtocol
                     LinkedList<ValidationResult> validations = [];
                     ActionResult result = method.TryDirectInvoke(objectBDP, parameters);
                     if (result.SuccessfulExecution)
-                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingChart.Instance), validations, method.ObjectValidations)) return result;
+                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return result;
                        else return ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided.")));
                 }
 
@@ -282,7 +282,7 @@ namespace BurcatProtocol
                     LinkedList<ValidationResult> validations = [];
                     ActionResult result = method.TryInvoke(objectBDP, parameters, true, out IEnumerable<string> failedValidations);
                     if (result.SuccessfulExecution)
-                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingChart.Instance), validations, method.ObjectValidations)) return result;
+                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return result;
                         else return ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided.")));
                     else foreach (string validation in failedValidations) failedMessages.Add(validation);
                 }
@@ -306,12 +306,12 @@ namespace BurcatProtocol
                 if (field.GetFunction is Func<object?, object?> function)
                 {
                     object? value = function(objectBDP);
-                    if (!Validator.TryValidateValue(value, new ValidationContext(value ?? NothingChart.Instance) { MemberName = field.PublicName }, validations, field.Validations))
+                    if (!Validator.TryValidateValue(value, new ValidationContext(value ?? NothingInstance.Instance) { MemberName = field.PublicName }, validations, field.Validations))
                         return new BurcatValidationException($"Validation failed at field with name {field.PublicName}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
                 }
 
             if (Constructors.TryGetValue(GuidList.FromType(objectType), out ConcurrentDictionary<ObjectMethod, byte>? constructors) && constructors.Keys.FirstOrDefault() is ObjectMethod method)
-                if (!Validator.TryValidateValue(objectBDP, new ValidationContext(objectBDP ?? NothingChart.Instance), validations, method.ObjectValidations))
+                if (!Validator.TryValidateValue(objectBDP, new ValidationContext(objectBDP ?? NothingInstance.Instance), validations, method.ObjectValidations))
                     return new BurcatValidationException($"General validation state of object failed.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
 
             return null;
@@ -626,7 +626,7 @@ namespace BurcatProtocol
                     if (invokable)
                     {
                         foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                            if (!Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingChart.Instance), null, kvp.Value))
+                            if (!Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingInstance.Instance), null, kvp.Value))
                                 return ActionResult.Unsuccessful;
 
                         object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
@@ -655,7 +655,7 @@ namespace BurcatProtocol
                     if (invokable)
                     {
                         foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                            if (validate && !Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingChart.Instance), failedValidations, kvp.Value))
+                            if (validate && !Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingInstance.Instance), failedValidations, kvp.Value))
                             { validations = failedValidations.Where(v => v.ErrorMessage is not null).Select(v => v.ErrorMessage!); return ActionResult.Unsuccessful; }
 
                         object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);

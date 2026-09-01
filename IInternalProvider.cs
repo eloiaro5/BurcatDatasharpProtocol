@@ -148,8 +148,12 @@ namespace BurcatProtocol
         /// <inheritdoc/>
         public virtual ActionResult ExecuteAction(BurcatHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
-            BurcatCache.AddToCache(objectType);
-            return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
+            if (objectType == typeof(PingChart)) return new(null);
+            else
+            {
+                BurcatCache.AddToCache(objectType);
+                return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
+            }
         }
 
         /// <inheritdoc/>

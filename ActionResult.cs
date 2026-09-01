@@ -52,7 +52,7 @@ namespace BurcatProtocol
         /// Initializes a successful action result.
         /// </summary>
         /// <param name="result">The value returned by the action.</param>
-        public ActionResult(IBurcatObject? result) { SuccessfulExecution = true; Value = result is NothingChart ? null : result; }
+        public ActionResult(IBurcatObject? result) { SuccessfulExecution = true; Value = result is NothingInstance ? null : result; }
 
         /// <summary>
         /// Gets the wrapped value as the requested type, or throws the exception represented by an unsuccessful result.

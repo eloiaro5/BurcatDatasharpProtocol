@@ -75,7 +75,7 @@ namespace BurcatProtocol
         /// </summary>
         /// <param name="name">The protocol-visible field or property name.</param>
         /// <param name="value">The field or property value.</param>
-        public BurcatField(string name, object? value) { Name = name; Value = value is NothingChart ? null : value; }
+        public BurcatField(string name, object? value) { Name = name; Value = value is NothingInstance ? null : value; }
 
         /// <inheritdoc/>
         BurcatField[] IBurcatObject.GetBurcatFields() => [];

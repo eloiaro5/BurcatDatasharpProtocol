@@ -16,11 +16,6 @@ namespace BurcatProtocol
         Headers,
 
         /// <summary>
-        /// An object was sent.
-        /// </summary>
-        Object,
-
-        /// <summary>
         /// A revision was requested.
         /// </summary>
         RevisionRequest,

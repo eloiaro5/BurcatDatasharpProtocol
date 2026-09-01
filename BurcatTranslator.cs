@@ -258,7 +258,7 @@ namespace BurcatProtocol
         {
             if (value is IBurcatObject objectBDP)
             {
-                if (objectBDP is NothingChart) return null;
+                if (objectBDP is NothingInstance) return null;
                 else if (objectBDP is BurcatTranslation translation) return Translate(translation);
                 else return objectBDP;
             }
@@ -288,7 +288,7 @@ namespace BurcatProtocol
         /// <returns>The protocol object value.</returns>
         public static IBurcatObject? ObjectTranslate(object? value)
         {
-            if (value is null || value is NothingChart) return null;
+            if (value is null || value is NothingInstance) return null;
             else if (CanTranslate(value.GetType(), out Guid classID)) return new BurcatTranslation(classID, Translators[classID].ToBDP(value));
             else if (value is IBurcatObject objectBDP) return objectBDP;
             else throw new InvalidCastException();
@@ -309,7 +309,7 @@ namespace BurcatProtocol
                 {
                     if (values[i] is object value)
                     {
-                        if (value is NothingChart) translations[i] = null;
+                        if (value is NothingInstance) translations[i] = null;
                         else if (CanTranslate(value.GetType(), out Guid classID)) translations[i] = new BurcatTranslation(classID, Translators[classID].ToBDP(value));
                         else if (value is IBurcatObject objectBDP) translations[i] = objectBDP;
                         else throw new InvalidCastException();
