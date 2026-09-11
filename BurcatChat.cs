@@ -922,7 +922,6 @@ namespace BurcatProtocol
         /// <returns>The action result.</returns>
         public static ActionResult RelayAction<T>(BurcatBoradcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
-
         /// <summary>
         /// Sends an action request to another application through a stream.
         /// </summary>

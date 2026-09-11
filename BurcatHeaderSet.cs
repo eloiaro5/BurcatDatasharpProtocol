@@ -16,7 +16,7 @@ namespace BurcatProtocol
     /// header-specific data and do not participate in membership or equality checks.
     /// </remarks>
     [BurcatIdentity("00000000-0000-0000-0000-f045afd6bbb9")]
-    public sealed class BurcatHeaderSet : IBurcatObject, ISet<BurcatHeader>
+    public sealed class BurcatHeaderSet : IBurcatObject, ISet<BurcatHeader>, IReadOnlySet<BurcatHeader>
     {
         private Dictionary<Guid, Dictionary<string, string?>> Headers { get; } = [];
 

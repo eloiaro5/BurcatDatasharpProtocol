@@ -631,7 +631,7 @@ namespace BurcatProtocol
 
                         object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
                         if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
-                        else return new(null);
+                        else return new();
                     }
                     else return ActionResult.Unsuccessful;
                 }
@@ -660,7 +660,7 @@ namespace BurcatProtocol
 
                         object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
                         if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
-                        else return new(null);
+                        else return new();
                     }
                     else return ActionResult.Unsuccessful;
                 }
