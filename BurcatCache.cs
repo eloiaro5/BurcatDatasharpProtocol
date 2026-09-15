@@ -49,6 +49,8 @@ namespace BurcatProtocol
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<GenericMethod, byte>> GenericMethods { get; } = [];
         private static ConcurrentDictionary<MethodKey, ConcurrentDictionary<ObjectMethod, byte>> Methods { get; } = [];
 
+        private static ConcurrentDictionary<MethodKey, bool> HeadNeeds { get; } = [];
+
         /// <summary>
         /// Adds a field to the cache for a Burcat object type.
         /// </summary>
@@ -112,15 +114,16 @@ namespace BurcatProtocol
         /// <returns><see langword="true"/> when the method was added; otherwise, <see langword="false"/>.</returns>
         public static bool AddToCache(Type objectType, MethodInfo info)
         {
+            MethodKey key = new(GuidList.FromType(objectType), info);
+            HeadNeeds.TryAdd(key, info.GetCustomAttribute<NeedsBurcatHeadAttribute>() is not null);
+
             if (info.ContainsGenericParameters)
             {
-                GuidList guid = GuidList.FromType(objectType);
-                ConcurrentDictionary<GenericMethod, byte> methods = GenericMethods.GetOrAdd(guid, []);
+                ConcurrentDictionary<GenericMethod, byte> methods = GenericMethods.GetOrAdd(key.ClassGuid, []);
                 return methods.TryAdd(new(info), 0);
             }
             else
             {
-                MethodKey key = new(GuidList.FromType(objectType), info);
                 ConcurrentDictionary<ObjectMethod, byte> methods = Methods.GetOrAdd(key, []);
                 return methods.TryAdd(new([], info), 0);
             }
@@ -291,6 +294,8 @@ namespace BurcatProtocol
             }
             else return ActionResult.Thrown(new NotInBurcatCacheException($"Method with name {name} in {objectType.Name} is not cached."));
         }
+
+        public static bool? NeedsHead(Type objectType, string name) => HeadNeeds.TryGetValue(new(GuidList.FromType(objectType), name), out bool needsHead) ? needsHead : null;
 
         /// <summary>
         /// Validates the cached field values and object-level state of a Burcat object.
@@ -680,6 +685,7 @@ namespace BurcatProtocol
             public MethodKey(GuidList classGuid, GuidList methodGuid, string name) { ClassGuid = classGuid; Name = name.ToLower().Replace("_", null); MethodGuid = methodGuid; }
             public MethodKey(GuidList classGuid, GuidList methodGuid, MethodInfo info) : this(classGuid, methodGuid, info.Name) { }
             public MethodKey(GuidList classGuid, MethodInfo info) : this(classGuid, GuidList.Empty, info.Name) { }
+            public MethodKey(GuidList classGuid, string name) : this(classGuid, GuidList.Empty, name) { }
 
             public override bool Equals(object? obj)
             {

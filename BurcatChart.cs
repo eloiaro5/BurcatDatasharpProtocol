@@ -2,33 +2,29 @@
 
 namespace BurcatProtocol
 {
-    public abstract class BurcatChart : IBurcatObject
+    public abstract class BurcatChart : BurcatObject
     {
-        /// <inheritdoc/>
-        Guid IBurcatObject.Identifier { get; set => throw new InvalidOperationException(); } = Guid.Empty;
-        /// <inheritdoc/>
-        Guid IBurcatObject.Revision { get; set => throw new InvalidOperationException(); } = Guid.Empty;
+        public abstract BurcatChart Acknowledge();
 
-        public static void Acknowledge() => throw new NotImplementedException();
-
-        /// <inheritdoc/>
-        BurcatField[] IBurcatObject.GetBurcatFields() => [];
-        /// <inheritdoc/>
-        void IBurcatObject.SetBurcatFields(BurcatField[] fields) { }
-
-        /// <inheritdoc/>
-        IBurcatObject?[] IBurcatObject.GetBurcatConstructionValues() => [];
+        public override sealed BurcatField[] GetBurcatFields() => [];
+        public override sealed void SetBurcatFields(BurcatField[] fields) { }
     }
 
     /// <summary>
     /// Represents a protocol ping message.
     /// </summary>
     [BurcatIdentity("00000000-0000-0000-0000-70080ee0a69c")]
-    public sealed class PingChart : BurcatChart { }
+    public sealed class PingChart : BurcatChart
+    {
+        public static PingChart Instance { get; } = new();
+        public override BurcatChart Acknowledge() => Instance;
+
+        public override object?[] GetBurcatConstructionValues() => [];
+    }
 
     /// <summary>
     /// Represents a protocol marker that ends communication.
     /// </summary>
     [BurcatIdentity("00000000-0000-0000-0000-3674efed6bed")]
-    public sealed class EndOfCommunicationChart : BurcatChart { }
+    public abstract class EndOfCommunicationChart : BurcatChart { }
 }

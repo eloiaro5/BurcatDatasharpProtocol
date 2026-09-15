@@ -1,4 +1,5 @@
-﻿using System;
+﻿using BurcatProtocol.Transactions;
+using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Text;
