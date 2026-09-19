@@ -149,7 +149,6 @@ namespace BurcatProtocol
         public virtual ActionResult ExecuteAction(BurcatHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters)
         {
             BurcatCache.AddToCache(objectType);
-            if (BurcatCache.NeedsHead(objectType, action) ?? false) parameters = parameters is null ? [head] : [head, .. parameters];
             return BurcatCache.ExecuteAction(objectType, objectBDP, action, BurcatTranslator.ObjectsTranslate(parameters));
         }
 

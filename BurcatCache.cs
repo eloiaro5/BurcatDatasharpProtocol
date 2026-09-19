@@ -49,7 +49,7 @@ namespace BurcatProtocol
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<GenericMethod, byte>> GenericMethods { get; } = [];
         private static ConcurrentDictionary<MethodKey, ConcurrentDictionary<ObjectMethod, byte>> Methods { get; } = [];
 
-        private static ConcurrentDictionary<MethodKey, bool> HeadNeeds { get; } = [];
+        private static ConcurrentDictionary<MethodKey, bool> ContextNeeds { get; } = [];
 
         /// <summary>
         /// Adds a field to the cache for a Burcat object type.
@@ -115,7 +115,7 @@ namespace BurcatProtocol
         public static bool AddToCache(Type objectType, MethodInfo info)
         {
             MethodKey key = new(GuidList.FromType(objectType), info);
-            HeadNeeds.TryAdd(key, info.GetCustomAttribute<NeedsBurcatHeadAttribute>() is not null);
+            ContextNeeds.TryAdd(key, info.GetCustomAttribute<BurcatContextAttribute>() is not null);
 
             if (info.ContainsGenericParameters)
             {
@@ -295,7 +295,7 @@ namespace BurcatProtocol
             else return ActionResult.Thrown(new NotInBurcatCacheException($"Method with name {name} in {objectType.Name} is not cached."));
         }
 
-        public static bool? NeedsHead(Type objectType, string name) => HeadNeeds.TryGetValue(new(GuidList.FromType(objectType), name), out bool needsHead) ? needsHead : null;
+        public static bool? NeedsContext(Type objectType, string name) => ContextNeeds.TryGetValue(new(GuidList.FromType(objectType), name), out bool needsHead) ? needsHead : null;
 
         /// <summary>
         /// Validates the cached field values and object-level state of a Burcat object.

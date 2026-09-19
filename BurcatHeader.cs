@@ -48,21 +48,6 @@ namespace BurcatProtocol
             Value = value;
         }
 
-        public bool TryGetValue<T>([MaybeNullWhen(false)] out T? value) where T : notnull
-        {
-            if (Value is null)
-            {
-                value = default;
-                return false;
-            }
-            else return Transformable.TryDynamicCast<T>(Value, out value);
-        }
-        public T TryGetValue<T>() where T : notnull
-        {
-            if (TryGetValue(out T? value)) return value!;
-            else throw new InvalidCastException();
-        }
-
         /// <inheritdoc/>
         public override bool Equals(object? obj)
         {

@@ -1,17 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Transactions;
 
 namespace BurcatProtocol.Transactions
 {
-    public sealed class BurcatTransactionalSaga(IdentifiedStream stream, BurcatHeaderSet additionalHeaders, Guid transactionID)
+    public sealed class BurcatTransactionalSaga(IdentifiedStream stream, BurcatHeaderSet additionalHeaders)
     {
         private readonly Queue<Func<BurcatDirectionalHead, ActionResult>> _commitSaga = [];
         private readonly Queue<Action> _rollbackSaga = [];
 
         public IdentifiedStream Stream { get; } = stream;
         public BurcatHeaderSet AdditionalHeaders { get; } = additionalHeaders;
-        public Guid TransactionID { get; } = transactionID;
 
         public void QueueCouple(BurcatInstance instance, CancellationToken? token = null)
         {
@@ -37,26 +37,39 @@ namespace BurcatProtocol.Transactions
             _rollbackSaga.Enqueue(action);
         }
 
-        public BurcatException? Commit()
+        public BurcatException? Commit(CommitTransactionChart commitTransaction, RollbackTransactionChart rollbackTransaction, CancellationToken? token = null)
         {
-            BurcatDirectionalHead head = new(Stream, [BurcatTransaction.BuildHeader(TransactionID), .. AdditionalHeaders]);
-            BurcatException? exception = null;
-            while (exception is null && _commitSaga.TryDequeue(out Func<BurcatDirectionalHead, ActionResult>? func))
+            if (commitTransaction.TransactionID != rollbackTransaction.TransactionID) throw new InvalidOperationException("Cannot send a commit and rollback for different transactions.");
+            else if (commitTransaction.TransactionID == Guid.Empty) throw new InvalidOperationException("Cannot initiate a transactional saga with an empty transaction.");
+            else
             {
-                ActionResult result = func.Invoke(head);
-                if (!result.SuccessfulExecution) exception = result.Exception;
+                BurcatDirectionalHead head = new(Stream, [BurcatTransaction.BuildHeader(commitTransaction.TransactionID), .. AdditionalHeaders]);
+                BurcatException? exception = null;
+                while (exception is null && _commitSaga.TryDequeue(out Func<BurcatDirectionalHead, ActionResult>? func))
+                {
+                    ActionResult result;
+                    try { result = func.Invoke(head); }
+                    catch (OperationCanceledException) { result = ActionResult.Thrown(new("A opeation has been cancelled and, thus, failed execution.")); }
+
+                    if (!result.SuccessfulExecution) exception = result.Exception;
+                }
+
+                if (exception is null)
+                {
+                    ActionResult result = BurcatChat.SendAction(head, commitTransaction, nameof(BurcatChart.Acknowledge), token: token);
+                    exception = result.Exception ?? ((CommitTransactionChart)result.Value!).CommitException;
+                }
+                else
+                {
+                    while (_rollbackSaga.TryDequeue(out Action? action))
+                        try { action.Invoke(); }
+                        catch (OperationCanceledException) { }       
+
+                    exception = BurcatChat.SendAction(head, rollbackTransaction, nameof(BurcatChart.Acknowledge), token: token).Exception;
+                }
+
+                return exception;
             }
-
-            if (exception is not null)
-            {
-                while (_rollbackSaga.TryDequeue(out Action? action))
-                    action.Invoke();
-            }
-
-            _commitSaga.Clear();
-            _rollbackSaga.Clear();
-
-            return exception;
         }
     }
 }
