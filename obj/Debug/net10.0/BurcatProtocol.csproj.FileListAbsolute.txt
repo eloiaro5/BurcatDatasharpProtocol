@@ -10,3 +10,4 @@ C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\refint\Burca
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatProtocol.pdb
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\bin\Debug\net10.0\BurcatProtocol.dll
 C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\ref\BurcatProtocol.dll
+C:\Users\eloic\source\repos\Burcat\BurcatProtocol\obj\Debug\net10.0\BurcatPr.7C46EE64.Up2Date

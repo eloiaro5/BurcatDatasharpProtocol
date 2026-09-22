@@ -5,4 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="Cache\ConstructorAdditionEventArgs.cs" />
+  </ItemGroup>
 </Project>

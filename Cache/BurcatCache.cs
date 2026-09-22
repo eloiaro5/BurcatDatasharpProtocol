@@ -15,7 +15,7 @@ using System.Text;
 using System.Xml.Linq;
 using static System.Collections.Specialized.BitVector32;
 
-namespace BurcatProtocol
+namespace BurcatProtocol.Cache
 {
     /// <summary>
     /// Caches reflected Burcat fields, properties, constructors, and methods for faster protocol execution.
@@ -44,10 +44,15 @@ namespace BurcatProtocol
         public const BindingFlags PublicConstructorsFlags = BindingFlags.Public | BindingFlags.Instance;
 
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<ObjectField, byte>> Fields { get; } = [];
+        public static event EventHandler<FieldAdditionEventArgs>? FieldAddition;
+        public static event EventHandler<PropertyAdditionEventArgs>? PropertyAddition;
+
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<ObjectMethod, byte>> Constructors { get; } = [];
+        public static event EventHandler<ConstructorAdditionEventArgs>? ConstructorAddition;
 
         private static ConcurrentDictionary<GuidList, ConcurrentDictionary<GenericMethod, byte>> GenericMethods { get; } = [];
         private static ConcurrentDictionary<MethodKey, ConcurrentDictionary<ObjectMethod, byte>> Methods { get; } = [];
+        public static event EventHandler<MethodAdditionEventArgs>? MethodAddition;
 
         private static ConcurrentDictionary<MethodKey, bool> ContextNeeds { get; } = [];
 
@@ -61,7 +66,10 @@ namespace BurcatProtocol
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectField, byte> fields = Fields.GetOrAdd(guid, []);
-            return fields.TryAdd(new(info), 0);
+
+            bool added = fields.TryAdd(new(info), 0);
+            if (added) FieldAddition?.Invoke(null, new(objectType, info));
+            return added;
         }
 
         /// <summary>
@@ -82,7 +90,10 @@ namespace BurcatProtocol
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectField, byte> fields = Fields.GetOrAdd(guid, []);
-            return fields.TryAdd(new(info), 0);
+
+            bool added = fields.TryAdd(new(info), 0);
+            if (added) PropertyAddition?.Invoke(null, new(objectType, info));
+            return added;
         }
 
         /// <summary>
@@ -103,7 +114,10 @@ namespace BurcatProtocol
         {
             GuidList guid = GuidList.FromType(objectType);
             ConcurrentDictionary<ObjectMethod, byte> constructors = Constructors.GetOrAdd(guid, []);
-            return constructors.TryAdd(new(info), 0);
+
+            bool added = constructors.TryAdd(new(info), 0);
+            if (added) ConstructorAddition?.Invoke(null, new(objectType, info));
+            return added;
         }
 
         /// <summary>
@@ -117,16 +131,20 @@ namespace BurcatProtocol
             MethodKey key = new(GuidList.FromType(objectType), info);
             ContextNeeds.TryAdd(key, info.GetCustomAttribute<BurcatContextAttribute>() is not null);
 
+            bool added;
             if (info.ContainsGenericParameters)
             {
                 ConcurrentDictionary<GenericMethod, byte> methods = GenericMethods.GetOrAdd(key.ClassGuid, []);
-                return methods.TryAdd(new(info), 0);
+                added = methods.TryAdd(new(info), 0);
             }
             else
             {
                 ConcurrentDictionary<ObjectMethod, byte> methods = Methods.GetOrAdd(key, []);
-                return methods.TryAdd(new([], info), 0);
+                added = methods.TryAdd(new([], info), 0);
             }
+
+            if (added) MethodAddition?.Invoke(null, new(objectType, info));
+            return added;
         }
 
         private static ConcurrentDictionary<GuidList, byte> InCache { get; } = [];
@@ -169,9 +187,18 @@ namespace BurcatProtocol
         /// <returns>The readable protocol fields currently cached for the object's type.</returns>
         public static BurcatField[] GetFields(IBurcatObject objectBDP)
         {
-            if (Fields.TryGetValue(new(objectBDP), out ConcurrentDictionary<ObjectField, byte>? fields)) return [.. fields.Keys.Where(f => f.GetFunction is not null).Select(f => new BurcatField(f.PublicName, BurcatTranslator.ObjectTranslate(f.GetFunction!(objectBDP))))];
-            else return [];
+            BeforeGettingFields?.Invoke(null, new(objectBDP));
+
+            BurcatField[] result = Fields.TryGetValue(new(objectBDP), out ConcurrentDictionary<ObjectField, byte>? fields)
+                ? [.. fields.Keys.Where(f => f.GetFunction is not null).Select(f => new BurcatField(f.PublicName, BurcatTranslator.ObjectTranslate(f.GetFunction!(objectBDP))))]
+                : [];
+
+            AfterGettingFieldsEventArgs eventArgs = new(objectBDP, result);
+            AfterGettingFields?.Invoke(null, eventArgs);
+            return eventArgs.ObtainedFields;
         }
+        public static event EventHandler<BeforeGettingFieldsEventArgs>? BeforeGettingFields;
+        public static event EventHandler<AfterGettingFieldsEventArgs>? AfterGettingFields;
 
         /// <summary>
         /// Sets a cached field or property value on a Burcat object.
@@ -183,8 +210,15 @@ namespace BurcatProtocol
         /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
         public static BurcatException? SetField(Type objectType, IBurcatObject? objectBDP, BurcatField field, bool validate = false)
         {
+            BeforeSettingFieldEventArgs eventArgs = new(objectType, objectBDP, field, validate);
+            BeforeSettingField?.Invoke(null, eventArgs);
+
+            field = eventArgs.Field;
+            validate = eventArgs.Validate;
+
             LinkedList<ValidationResult> validations = [];
             ObjectField same = new(objectType, field);
+            BurcatException? result;
 
             if (Fields[objectBDP is null ? GuidList.FromType(objectType) : new(objectBDP)].Keys.FirstOrDefault(k => k.CompareTo(same) == 0) is ObjectField f)
                 if (f.SetAction is Action<object?, object?> action)
@@ -204,15 +238,20 @@ namespace BurcatProtocol
                         if (!validate || Validator.TryValidateValue(value, new ValidationContext(value ?? NothingInstance.Instance) { MemberName = f.PublicName }, validations, f.Validations))
                         {
                             action(objectBDP, value);
-                            return null;
+                            result = null;
                         }
-                        else return new BurcatValidationException($"Validation failed at field with name {field.Name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
+                        else result = new BurcatValidationException($"Validation failed at field with name {field.Name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."));
                     }
-                    else return new BurcatException("The object cannot be converted to the field type.");
+                    else result = new BurcatException("The object cannot be converted to the field type.");
                 }
-                else return new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} has no setter cached.");
-            else return new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} is not cached.");
+                else result = new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} has no setter cached.");
+            else result = new NotInBurcatCacheException($"Field with name {field.Name} in {objectType.Name} is not cached.");
+
+            AfterSettingField?.Invoke(null, new(objectType, objectBDP, field, validate, result));
+            return result;
         }
+        public static event EventHandler<BeforeSettingFieldEventArgs>? BeforeSettingField;
+        public static event EventHandler<AfterSettingFieldEventArgs>? AfterSettingField;
 
         /// <summary>
         /// Constructs a Burcat object from cached constructors and protocol parameters.
@@ -223,24 +262,30 @@ namespace BurcatProtocol
         /// <exception cref="InvalidOperationException">Thrown when no cached constructor can accept the provided parameters.</exception>
         public static IBurcatObject? Construct(Type objectType, IBurcatObject?[] parameters)
         {
+            BeforeConstructingEventArgs eventArgs = new(objectType, parameters);
+            BeforeConstructing?.Invoke(null, eventArgs);
+            parameters = eventArgs.Parameters;
+
             if (Constructors.TryGetValue(GuidList.FromType(objectType), out ConcurrentDictionary<ObjectMethod, byte>? constructors))
             {
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryDirectInvoke(null, parameters);
-                    if (result.SuccessfulExecution) return result.Value;
+                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, result.Value)); return result; }
                 }
 
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryInvoke(null, parameters, false, out IEnumerable<string> _);
-                    if (result.SuccessfulExecution) return result.Value;
+                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, result.Value)); return result; }
                 }
 
                 throw new InvalidOperationException($"There's no constructors avaliable in {objectType.Name} for the provided parameters.");
             }
             else throw new InvalidOperationException($"There's no constructors avaliable in {objectType.Name}.");
         }
+        public static event EventHandler<BeforeConstructingEventArgs>? BeforeConstructing;
+        public static event EventHandler<AfterConstructingEventArgs>? AfterConstructing;
 
         /// <summary>
         /// Executes a cached method or action on a Burcat object type.
@@ -252,6 +297,12 @@ namespace BurcatProtocol
         /// <returns>The action result or the protocol exception produced while trying to execute it.</returns>
         public static ActionResult ExecuteAction(Type objectType, IBurcatObject? objectBDP, string name, IBurcatObject?[] parameters)
         {
+            BeforeExecutingActionEventArgs eventArgs = new(objectType, objectBDP, name, parameters);
+            BeforeExecutingAction?.Invoke(null, new(objectType, objectBDP, name, parameters));
+            parameters = eventArgs.Parameters;
+
+            IBurcatObject?[] eventParameters = parameters;
+
             LinkedList<Type> genericTypesList = [];
             for (int i = 0; i < parameters.Length && parameters[i] is BurcatType type; i++) genericTypesList.AddLast(type.Nullable ? type.GetTypeCLR().MakeGenericType() : type.GetTypeCLR());
             Type[] genericTypes = [.. genericTypesList];
@@ -276,8 +327,8 @@ namespace BurcatProtocol
                     LinkedList<ValidationResult> validations = [];
                     ActionResult result = method.TryDirectInvoke(objectBDP, parameters);
                     if (result.SuccessfulExecution)
-                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return result;
-                       else return ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided.")));
+                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, result);
+                       else return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."))));
                 }
 
                 foreach (ObjectMethod method in methods.Keys)
@@ -285,14 +336,22 @@ namespace BurcatProtocol
                     LinkedList<ValidationResult> validations = [];
                     ActionResult result = method.TryInvoke(objectBDP, parameters, true, out IEnumerable<string> failedValidations);
                     if (result.SuccessfulExecution)
-                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return result;
-                        else return ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided.")));
+                        if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, result);
+                        else return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."))));
                     else foreach (string validation in failedValidations) failedMessages.Add(validation);
                 }
 
-                return ActionResult.Thrown(new BurcatValidationException($"Method with name {name} in {objectType.Name} was found in cache, but none was executable with the provided parameters.", payload: failedMessages));
+                return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, ActionResult.Thrown(new BurcatValidationException($"Method with name {name} in {objectType.Name} was found in cache, but none was executable with the provided parameters.", payload: failedMessages)));
             }
-            else return ActionResult.Thrown(new NotInBurcatCacheException($"Method with name {name} in {objectType.Name} is not cached."));
+            else return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, ActionResult.Thrown(new NotInBurcatCacheException($"Method with name {name} in {objectType.Name} is not cached.")));
+        }
+        public static event EventHandler<BeforeExecutingActionEventArgs>? BeforeExecutingAction;
+        public static event EventHandler<AfterExecutingActionEventArgs>? AfterExecutingAction;
+
+        private static ActionResult RaiseAfterExecutingAction(Type objectType, IBurcatObject? objectBDP, string name, IBurcatObject?[] parameters, ActionResult result)
+        {
+            AfterExecutingAction?.Invoke(null, new(objectType, objectBDP, name, parameters, result));
+            return result;
         }
 
         public static bool? NeedsContext(Type objectType, string name) => ContextNeeds.TryGetValue(new(GuidList.FromType(objectType), name), out bool needsHead) ? needsHead : null;

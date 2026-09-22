@@ -37,7 +37,7 @@ namespace BurcatProtocol.Transactions
             _rollbackSaga.Enqueue(action);
         }
 
-        public BurcatException? Commit(CommitTransactionChart commitTransaction, RollbackTransactionChart rollbackTransaction, CancellationToken? token = null)
+        public async Task<BurcatException?> CommitAsync(CommitTransactionChart commitTransaction, RollbackTransactionChart rollbackTransaction, CancellationToken? token = null)
         {
             if (commitTransaction.TransactionID != rollbackTransaction.TransactionID) throw new InvalidOperationException("Cannot send a commit and rollback for different transactions.");
             else if (commitTransaction.TransactionID == Guid.Empty) throw new InvalidOperationException("Cannot initiate a transactional saga with an empty transaction.");
@@ -48,7 +48,7 @@ namespace BurcatProtocol.Transactions
                 while (exception is null && _commitSaga.TryDequeue(out Func<BurcatDirectionalHead, ActionResult>? func))
                 {
                     ActionResult result;
-                    try { result = func.Invoke(head); }
+                    try { result = await Task.Run(() => func.Invoke(head)); }
                     catch (OperationCanceledException) { result = ActionResult.Thrown(new("A opeation has been cancelled and, thus, failed execution.")); }
 
                     if (!result.SuccessfulExecution) exception = result.Exception;
@@ -56,16 +56,16 @@ namespace BurcatProtocol.Transactions
 
                 if (exception is null)
                 {
-                    ActionResult result = BurcatChat.SendAction(head, commitTransaction, nameof(BurcatChart.Acknowledge), token: token);
+                    ActionResult result = await BurcatChat.SendActionAsync(head, commitTransaction, nameof(BurcatChart.Acknowledge), token: token);
                     exception = result.Exception ?? ((CommitTransactionChart)result.Value!).CommitException;
                 }
                 else
                 {
                     while (_rollbackSaga.TryDequeue(out Action? action))
-                        try { action.Invoke(); }
+                        try { await Task.Run(action); }
                         catch (OperationCanceledException) { }       
 
-                    exception = BurcatChat.SendAction(head, rollbackTransaction, nameof(BurcatChart.Acknowledge), token: token).Exception;
+                    exception = (await BurcatChat.SendActionAsync(head, rollbackTransaction, nameof(BurcatChart.Acknowledge), token: token)).Exception ?? exception;
                 }
 
                 return exception;

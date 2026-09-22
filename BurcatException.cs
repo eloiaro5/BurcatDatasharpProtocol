@@ -1,4 +1,5 @@
 ﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Cache;
 using System.Runtime.InteropServices;
 using System.Text;
 

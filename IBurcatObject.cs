@@ -1,4 +1,5 @@
 ﻿using BurcatProtocol.Annotations;
+using BurcatProtocol.Cache;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
