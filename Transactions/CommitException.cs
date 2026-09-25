@@ -4,5 +4,5 @@ using System.Text;
 
 namespace BurcatProtocol.Transactions
 {
-    public class BurcatCommitException(string message) : BurcatException(message) { }
+    public class CommitException(string message) : BurcatException(message) { }
 }

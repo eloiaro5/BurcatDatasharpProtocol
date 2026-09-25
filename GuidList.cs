@@ -7,7 +7,7 @@ namespace BurcatProtocol
     /// <summary>
     /// Represents an ordered list of GUIDs used as a composite cache key.
     /// </summary>
-    public class GuidList : IComparable<GuidList>, IEnumerable<Guid>
+    public class GuidList : IComparable<GuidList>, IReadOnlyList<Guid>
     {
         /// <summary>
         /// Builds a composite GUID key from a CLR type.
@@ -108,6 +108,9 @@ namespace BurcatProtocol
             this.guids = [.. guids];
             hashCode = ComputeHashCode(this.guids);
         }
+
+        public int Count => guids.Length;
+        public Guid this[int index] => guids[index];
 
         /// <inheritdoc/>
         public override bool Equals(object? obj)

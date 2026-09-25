@@ -77,9 +77,17 @@ namespace BurcatProtocol
         /// <param name="value">The field or property value.</param>
         public BurcatField(string name, object? value) { Name = name; Value = value is NothingInstance ? null : value; }
 
+        public override bool Equals(object? obj)
+        {
+            if (obj is null) return false;
+            else if (ReferenceEquals(this, obj)) return true;
+            else if (obj is BurcatField other) return Name.Equals(other.Name) && ((Value is null && other.Value is null) || (Value is not null && Value.Equals(other.Value)));
+            else return false;
+        }
+        public override int GetHashCode() => HashCode.Combine(Name, Value);
+
         /// <inheritdoc/>
         BurcatField[] IBurcatObject.GetBurcatFields() => [];
-
         /// <inheritdoc/>
         void IBurcatObject.SetBurcatFields(BurcatField[] fields) { }
 

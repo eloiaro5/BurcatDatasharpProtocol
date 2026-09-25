@@ -5,7 +5,7 @@ using System.Transactions;
 
 namespace BurcatProtocol.Transactions
 {
-    public sealed class BurcatTransactionalSaga(IdentifiedStream stream, BurcatHeaderSet additionalHeaders)
+    public sealed class TransactionalSaga(IdentifiedStream stream, BurcatHeaderSet additionalHeaders)
     {
         private readonly Queue<Func<BurcatDirectionalHead, ActionResult>> _commitSaga = [];
         private readonly Queue<Action> _rollbackSaga = [];

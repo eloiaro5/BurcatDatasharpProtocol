@@ -24,10 +24,10 @@ namespace BurcatProtocol.Transactions
     public abstract class CommitTransactionChart : BurcatChart
     {
         protected CommitTransactionChart(Guid transactionID) { TransactionID = transactionID; }
-        protected CommitTransactionChart(Guid transactionID, BurcatCommitException? commitException) : this(transactionID) { CommitException = commitException; }
+        protected CommitTransactionChart(Guid transactionID, CommitException? commitException) : this(transactionID) { CommitException = commitException; }
         
         public Guid TransactionID { get; }
-        public BurcatCommitException? CommitException { get; }
+        public CommitException? CommitException { get; }
 
         public override sealed object?[] GetBurcatConstructionValues() => [TransactionID, CommitException];
     }

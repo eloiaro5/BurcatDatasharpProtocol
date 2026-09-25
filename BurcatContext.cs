@@ -1,4 +1,5 @@
-﻿using System;
+﻿using BurcatProtocol.Collections;
+using System;
 using System.Collections.Generic;
 
 namespace BurcatProtocol
@@ -10,43 +11,22 @@ namespace BurcatProtocol
     /// Context keys use ordinal, case-sensitive comparison by default so their
     /// meaning remains stable across cultures and communicating applications.
     /// </remarks>
-    public class BurcatContext : Dictionary<string, object?>
+    public class BurcatContext : ListHashDictionary<string, object?>
     {
-        /// <summary>
-        /// Initializes an empty context using ordinal key comparison.
-        /// </summary>
-        public BurcatContext() : base(StringComparer.Ordinal) { }
+        public BurcatContext() { }
 
-        /// <summary>
-        /// Initializes an empty context with space for the specified number of values.
-        /// </summary>
-        /// <param name="capacity">The initial number of values the context can hold.</param>
-        public BurcatContext(int capacity) : base(capacity, StringComparer.Ordinal) { }
+        public BurcatContext(Guid identifier) : base(identifier) { }
 
-        /// <summary>
-        /// Initializes an empty context with the specified key comparer.
-        /// </summary>
-        /// <param name="comparer">The comparer used to compare context keys.</param>
-        public BurcatContext(IEqualityComparer<string>? comparer) : base(comparer) { }
+        public BurcatContext(IEnumerable<KeyValueDuo<string, object?>> values) : base(values) { }
 
-        /// <summary>
-        /// Initializes an empty context with the specified capacity and key comparer.
-        /// </summary>
-        /// <param name="capacity">The initial number of values the context can hold.</param>
-        /// <param name="comparer">The comparer used to compare context keys.</param>
-        public BurcatContext(int capacity, IEqualityComparer<string>? comparer) : base(capacity, comparer) { }
+        public BurcatContext(IEqualityComparer<string> comparer) : base(comparer) { }
 
-        /// <summary>
-        /// Initializes a context from named values using ordinal key comparison.
-        /// </summary>
-        /// <param name="values">The values to copy into the context.</param>
-        public BurcatContext(IEnumerable<KeyValuePair<string, object?>> values) : base(values, StringComparer.Ordinal) { }
+        public BurcatContext(Guid identifier, IEnumerable<KeyValueDuo<string, object?>> values) : base(identifier, values) { }
 
-        /// <summary>
-        /// Initializes a context from named values with the specified key comparer.
-        /// </summary>
-        /// <param name="values">The values to copy into the context.</param>
-        /// <param name="comparer">The comparer used to compare context keys.</param>
-        public BurcatContext(IEnumerable<KeyValuePair<string, object?>> values, IEqualityComparer<string>? comparer) : base(values, comparer) { }
+        public BurcatContext(Guid identifier, IEqualityComparer<string> comparer) : base(identifier, comparer) { }
+
+        public BurcatContext(IEnumerable<KeyValueDuo<string, object?>> values, IEqualityComparer<string> comparer) : base(values, comparer) { }
+
+        public BurcatContext(Guid identifier, IEnumerable<KeyValueDuo<string, object?>> values, IEqualityComparer<string> comparer) : base(identifier, values, comparer) { }
     }
 }

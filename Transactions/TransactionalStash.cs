@@ -6,7 +6,7 @@ namespace BurcatProtocol.Transactions
     /// <summary>
     /// Keeps the objects used by one transaction together with the revisions observed when they were first used.
     /// </summary>
-    public sealed class BurcatTransactionalStash(IInternalProvider internalProvider, Guid transactionID)
+    public sealed class TransactionalStash(IInternalProvider internalProvider, Guid transactionID)
     {
         private readonly Dictionary<Guid, Dictionary<Guid, StashedInstance>> classes = [];
 

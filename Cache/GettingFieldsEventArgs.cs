@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 
 namespace BurcatProtocol.Cache
@@ -9,9 +10,11 @@ namespace BurcatProtocol.Cache
         public IBurcatObject RequestedObject { get; } = requestedObject;
     }
 
-    public class AfterGettingFieldsEventArgs(IBurcatObject requestedObject, BurcatField[] obtainedFields)
+    public class AfterGettingFieldsEventArgs(IBurcatObject requestedObject, MemberInfo[] inspectedMembers, BurcatField[] obtainedFields)
     {
         public IBurcatObject RequestedObject { get; } = requestedObject;
+        public MemberInfo[] InspectedMembers { get; } = inspectedMembers;
+
         public BurcatField[] ObtainedFields { get; set; } = obtainedFields;
     }
 }
