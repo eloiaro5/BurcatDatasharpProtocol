@@ -8,7 +8,6 @@ namespace BurcatProtocol.Transactions
     public sealed class TransactionalSaga(IdentifiedStream stream, BurcatHeaderSet additionalHeaders)
     {
         private readonly Queue<Func<BurcatDirectionalHead, ActionResult>> _commitSaga = [];
-        private readonly Queue<Action> _rollbackSaga = [];
 
         public IdentifiedStream Stream { get; } = stream;
         public BurcatHeaderSet AdditionalHeaders { get; } = additionalHeaders;
@@ -32,11 +31,6 @@ namespace BurcatProtocol.Transactions
         public void QueueAction<T>(T objectBDP, string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => QueueAction(BurcatInstance.Build(objectBDP), action, parameters, token);
         public void QueueAction<T>(string action, object?[]? parameters = null, CancellationToken? token = null) where T : IBurcatObject => QueueAction(BurcatInstance.Build<T>(), action, parameters, token);
 
-        public void QueueRollback(Action action)
-        {
-            _rollbackSaga.Enqueue(action);
-        }
-
         public async Task<BurcatException?> CommitAsync(CommitTransactionChart commitTransaction, RollbackTransactionChart rollbackTransaction, CancellationToken? token = null)
         {
             if (commitTransaction.TransactionID != rollbackTransaction.TransactionID) throw new InvalidOperationException("Cannot send a commit and rollback for different transactions.");
@@ -59,14 +53,7 @@ namespace BurcatProtocol.Transactions
                     ActionResult result = await BurcatChat.SendActionAsync(head, commitTransaction, nameof(BurcatChart.Acknowledge), token: token);
                     exception = result.Exception ?? ((CommitTransactionChart)result.Value!).CommitException;
                 }
-                else
-                {
-                    while (_rollbackSaga.TryDequeue(out Action? action))
-                        try { await Task.Run(action); }
-                        catch (OperationCanceledException) { }       
-
-                    exception = (await BurcatChat.SendActionAsync(head, rollbackTransaction, nameof(BurcatChart.Acknowledge), token: token)).Exception ?? exception;
-                }
+                else exception = (await BurcatChat.SendActionAsync(head, rollbackTransaction, nameof(BurcatChart.Acknowledge), token: token)).Exception ?? exception;
 
                 return exception;
             }

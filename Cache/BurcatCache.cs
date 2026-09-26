@@ -278,13 +278,13 @@ namespace BurcatProtocol.Cache
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryDirectInvoke(null, parameters);
-                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, (ConstructorInfo)constructor.Method, result.Value)); return result; }
+                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, (ConstructorInfo)constructor.Method, result.Value)); return result.Value; }
                 }
 
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
                     ActionResult result = constructor.TryInvoke(null, parameters, false, out IEnumerable<string> _);
-                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, (ConstructorInfo)constructor.Method, result.Value)); return result; }
+                    if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, (ConstructorInfo)constructor.Method, result.Value)); return result.Value; }
                 }
 
                 AfterConstructing?.Invoke(null, new(objectType, parameters, null, null));

@@ -58,30 +58,29 @@ namespace BurcatProtocol.Transactions
 
         public static void Rollback(Guid streamID, Guid transactionID)
         {
-            if (!RollbackActions.TryRemove(new([streamID, transactionID]), out ConcurrentStack<RollbackAction>? actions)) return;
-
-            List<Exception> exceptions = [];
-            IsRollingBack.Value = true;
-            try
+            if (RollbackActions.TryRemove(new([streamID, transactionID]), out ConcurrentStack<RollbackAction>? actions))
             {
-                while (actions.TryPop(out RollbackAction? action))
+                List<Exception> exceptions = [];
+                IsRollingBack.Value = true;
+
+                try
                 {
-                    ActionResult result = BurcatCache.ExecuteAction(action.ObjectType, action.TargetObject, action.Name, action.Parameters);
-                    if (!result.SuccessfulExecution)
+                    while (actions.TryPop(out RollbackAction? action))
                     {
-                        Exception exception = result.Exception is BurcatException burcatException
-                            ? BurcatException.ToException(burcatException)
-                            : new InvalidOperationException($"Rollback action {action.Name} did not execute successfully.");
-                        exceptions.Add(exception);
+                        ActionResult result = BurcatCache.ExecuteAction(action.ObjectType, action.TargetObject, action.Name, action.Parameters);
+                        if (!result.SuccessfulExecution)
+                        {
+                            Exception exception = result.Exception is BurcatException burcatException
+                                ? BurcatException.ToException(burcatException)
+                                : new InvalidOperationException($"Rollback action {action.Name} did not execute successfully.");
+                            exceptions.Add(exception);
+                        }
                     }
                 }
-            }
-            finally
-            {
-                IsRollingBack.Value = false;
-            }
+                finally { IsRollingBack.Value = false; }
 
-            if (exceptions.Count != 0) throw new AggregateException("One or more rollback actions failed.", exceptions);
+                if (exceptions.Count != 0) throw new AggregateException("One or more rollback actions failed.", exceptions);
+            }
         }
 
         private static (IBurcatObject?[] GenericParameters, IBurcatObject?[] ActionParameters) SplitGenericParameters(IBurcatObject?[] parameters)

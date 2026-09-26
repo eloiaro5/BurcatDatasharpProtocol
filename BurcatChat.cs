@@ -285,23 +285,15 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         public static void Purge(IdentifiedStream stream, CancellationToken? token = null) => PurgeAsync(stream, token).GetAwaiter().GetResult();
 
-        /// <summary>
-        /// Resolves the current revision for an object reference through the configured providers.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity of the referenced object.</param>
-        /// <param name="objectID">The object reference identity.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
-        public static async Task<Guid> RelayRevisionRequestAsync(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
+        private static async Task<Guid> RelayRevisionRequestAsync(BurcatHead? otherHead, BurcatBroadcastHead externalHead, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
         {
             CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
             Guid version;
 
             if (AcceptedIdentities.TryGetType(classID, out Type? type))
             {
-                version = ignoreInternal ? Guid.Empty : InternalProvider.GetRevision(head, type, objectID);
-                if (version == Guid.Empty && ExternalProvider is not null) version = await ExternalProvider.GetRevision(head, type, objectID, cancellation);
+                version = ignoreInternal ? Guid.Empty : InternalProvider.GetRevision(otherHead ?? externalHead, type, objectID);
+                if (version == Guid.Empty && ExternalProvider is not null) version = await ExternalProvider.GetRevision(externalHead, type, objectID, cancellation);
                 cancellation.ThrowIfCancellationRequested();
             }
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
@@ -317,7 +309,17 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
-        public static Guid RelayRevisionRequest(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<Guid> RelayRevisionRequestAsync(BurcatBroadcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(null, head, classID, objectID, ignoreInternal, token);
+
+        /// <summary>
+        /// Resolves the current revision for an object reference through the configured providers.
+        /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
+        public static Guid RelayRevisionRequest(BurcatBroadcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayRevisionRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends a revision request to another application through a stream.
@@ -392,23 +394,15 @@ namespace BurcatProtocol
         /// <returns>The revision returned by the remote application.</returns>
         public static Guid SendRevisionRequest(BurcatDirectionalHead head, Guid classID, Guid objectID, CancellationToken? token = null) => SendRevisionRequestAsync(head, classID, objectID, token).GetAwaiter().GetResult();
 
-        /// <summary>
-        /// Resolves an object reference through the configured providers.
-        /// </summary>
-        /// <param name="classID">The Burcat class identity of the referenced object.</param>
-        /// <param name="objectID">The object reference identity.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static async Task<IBurcatObject?> RelayObjectRequestAsync(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
+        private static async Task<IBurcatObject?> RelayObjectRequestAsync(BurcatHead? otherHead, BurcatBroadcastHead externalHead, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null)
         {
             CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
             IBurcatObject? reference;
 
             if (AcceptedIdentities.TryGetType(classID, out Type? type))
             {
-                reference = ignoreInternal ? null : InternalProvider.GetObject(head, type, objectID);
-                if (reference is null && ExternalProvider is not null) reference = await ExternalProvider.GetObject(head, type, objectID, cancellation);
+                reference = ignoreInternal ? null : InternalProvider.GetObject(otherHead ?? externalHead, type, objectID);
+                if (reference is null && ExternalProvider is not null) reference = await ExternalProvider.GetObject(externalHead, type, objectID, cancellation);
                 cancellation.ThrowIfCancellationRequested();
             }
             else throw new NotSupportedException($"Version with identifier {classID} is not supported.");
@@ -419,12 +413,22 @@ namespace BurcatProtocol
         /// <summary>
         /// Resolves an object reference through the configured providers.
         /// </summary>
+        /// <param name="classID">The Burcat class identity of the referenced object.</param>
+        /// <param name="objectID">The object reference identity.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
+        public static Task<IBurcatObject?> RelayObjectRequestAsync(BurcatBroadcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(null, head, classID, objectID, ignoreInternal, token);
+
+        /// <summary>
+        /// Resolves an object reference through the configured providers.
+        /// </summary>
         /// <typeparam name="T">The expected object type.</typeparam>
         /// <param name="objectID">The object reference identity.</param>
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static async Task<T?> RelayObjectRequestAsync<T>(BurcatBoradcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await RelayObjectRequestAsync(head, GetClassIdentity<T>(), objectID, ignoreInternal, token); return result; }
+        public static async Task<T?> RelayObjectRequestAsync<T>(BurcatBroadcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject { T? result = (T?)await RelayObjectRequestAsync(head, GetClassIdentity<T>(), objectID, ignoreInternal, token); return result; }
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -434,7 +438,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static Task<T?> RelayObjectRequestAsync<T>(BurcatBoradcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, (Guid)objectID, ignoreInternal, token);
+        public static Task<T?> RelayObjectRequestAsync<T>(BurcatBroadcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, (Guid)objectID, ignoreInternal, token);
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -444,7 +448,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static IBurcatObject? RelayObjectRequest(BurcatBoradcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static IBurcatObject? RelayObjectRequest(BurcatBroadcastHead head, Guid classID, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) => RelayObjectRequestAsync(head, classID, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -454,7 +458,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static T? RelayObjectRequest<T>(BurcatBoradcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static T? RelayObjectRequest<T>(BurcatBroadcastHead head, Guid objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Resolves an object reference through the configured providers.
@@ -464,7 +468,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The resolved object, or <see langword="null"/> when it is unavailable.</returns>
-        public static T? RelayObjectRequest<T>(BurcatBoradcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
+        public static T? RelayObjectRequest<T>(BurcatBroadcastHead head, BurcatIdentifier<T> objectID, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayObjectRequestAsync<T>(head, objectID, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an object request to another application through a stream.
@@ -571,15 +575,7 @@ namespace BurcatProtocol
         /// <returns>The object returned by the remote application, or <see langword="null"/>.</returns>
         public static T? SendObjectRequest<T>(BurcatDirectionalHead head, BurcatIdentifier<T> objectID, CancellationToken? token = null) where T : IBurcatObject => SendObjectRequestAsync<T>(head, objectID, token).GetAwaiter().GetResult();
 
-        /// <summary>
-        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
-        /// </summary>
-        /// <param name="instance">The instance metadata and value to couple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
-        public static async Task<BurcatException?> RelayCoupleAsync(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
+        private static async Task<BurcatException?> RelayCoupleAsync(BurcatHead? otherHead, BurcatBroadcastHead externalHead, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
         {
             if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
             else
@@ -588,21 +584,11 @@ namespace BurcatProtocol
                 cancellation.ThrowIfCancellationRequested();
 
                 if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
-                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.CoupleCache(head, instance.Value, true, cancellation);
-                else if (ExternalProvider is not null) return InternalProvider.CoupleCache(head, instance.Value, true) ?? await ExternalProvider.CoupleCache(head, instance.Value, true, cancellation);
-                else return InternalProvider.CoupleCache(head, instance.Value, true);
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.CoupleCache(externalHead, instance.Value, true, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.CoupleCache(otherHead ?? externalHead, instance.Value, true) ?? await ExternalProvider.CoupleCache(externalHead, instance.Value, true, cancellation);
+                else return InternalProvider.CoupleCache(otherHead ?? externalHead, instance.Value, true);
             }
         }
-
-        /// <summary>
-        /// Requests that the configured providers add or update an object in cache or storage.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="objectBDP">The object to couple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayCoupleAsync<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
 
         /// <summary>
         /// Requests that the configured providers add or update a Burcat instance in cache or storage.
@@ -612,7 +598,7 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
-        public static BurcatException? RelayCouple(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> RelayCoupleAsync(BurcatBroadcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(null, head, instance, ignoreInternal, token);
 
         /// <summary>
         /// Requests that the configured providers add or update an object in cache or storage.
@@ -622,7 +608,27 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static BurcatException? RelayCouple<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> RelayCoupleAsync<T>(BurcatBroadcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers add or update a Burcat instance in cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayCouple(BurcatBroadcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayCoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Requests that the configured providers add or update an object in cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to couple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        public static BurcatException? RelayCouple<T>(BurcatBroadcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayCoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an explicit cache add or update request for a Burcat instance to another application.
@@ -705,15 +711,7 @@ namespace BurcatProtocol
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static BurcatException? SendCouple<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendCoupleAsync(head, objectBDP, token).GetAwaiter().GetResult();
 
-        /// <summary>
-        /// Requests that the configured providers delete a Burcat instance from cache or storage.
-        /// </summary>
-        /// <param name="instance">The instance metadata and value to decouple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
-        public static async Task<BurcatException?> RelayDecoupleAsync(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
+        private static async Task<BurcatException?> RelayDecoupleAsync(BurcatHead? otherHead, BurcatBroadcastHead externalHead, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null)
         {
             if (instance.Value is null) throw new InvalidOperationException("Cannot couple a null object.");
             else
@@ -722,21 +720,11 @@ namespace BurcatProtocol
                 cancellation.ThrowIfCancellationRequested();
 
                 if (ignoreInternal && ExternalProvider is null) return new("No external provider is configured.");
-                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.DecoupleCache(head, instance.Value, cancellation);
-                else if (ExternalProvider is not null) return InternalProvider.DecoupleCache(head, instance.Value) ?? await ExternalProvider.DecoupleCache(head, instance.Value, cancellation);
-                else return InternalProvider.DecoupleCache(head, instance.Value);
+                else if (ignoreInternal && ExternalProvider is not null) return await ExternalProvider.DecoupleCache(externalHead, instance.Value, cancellation);
+                else if (ExternalProvider is not null) return InternalProvider.DecoupleCache(otherHead ?? externalHead, instance.Value) ?? await ExternalProvider.DecoupleCache(externalHead, instance.Value, cancellation);
+                else return InternalProvider.DecoupleCache(otherHead ?? externalHead, instance.Value);
             }
         }
-
-        /// <summary>
-        /// Requests that the configured providers delete an object from cache or storage.
-        /// </summary>
-        /// <typeparam name="T">The object type.</typeparam>
-        /// <param name="objectBDP">The object to decouple.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static Task<BurcatException?> RelayDecoupleAsync<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
 
         /// <summary>
         /// Requests that the configured providers delete a Burcat instance from cache or storage.
@@ -746,7 +734,7 @@ namespace BurcatProtocol
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
         /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
-        public static BurcatException? RelayDecouple(BurcatBoradcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> RelayDecoupleAsync(BurcatBroadcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(null, head, instance, ignoreInternal, token);
 
         /// <summary>
         /// Requests that the configured providers delete an object from cache or storage.
@@ -756,7 +744,27 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
-        public static BurcatException? RelayDecouple<T>(BurcatBoradcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
+        public static Task<BurcatException?> RelayDecoupleAsync<T>(BurcatBroadcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, BurcatInstance.Build(objectBDP), ignoreInternal, token);
+
+        /// <summary>
+        /// Requests that the configured providers delete a Burcat instance from cache or storage.
+        /// </summary>
+        /// <param name="instance">The instance metadata and value to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        /// <exception cref="InvalidOperationException">Thrown when the instance has a <see langword="null"/> value.</exception>
+        public static BurcatException? RelayDecouple(BurcatBroadcastHead head, BurcatInstance instance, bool ignoreInternal = false, CancellationToken? token = null) => RelayDecoupleAsync(head, instance, ignoreInternal, token).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Requests that the configured providers delete an object from cache or storage.
+        /// </summary>
+        /// <typeparam name="T">The object type.</typeparam>
+        /// <param name="objectBDP">The object to decouple.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and send only to the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns><see langword="null"/> on success; otherwise, the exception reported by a provider.</returns>
+        public static BurcatException? RelayDecouple<T>(BurcatBroadcastHead head, T objectBDP, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayDecoupleAsync(head, objectBDP, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Sends an explicit cache delete request for a Burcat instance to another application.
@@ -839,26 +847,17 @@ namespace BurcatProtocol
         /// <returns><see langword="null"/> on success; otherwise, the exception returned by the remote application.</returns>
         public static BurcatException? SendDecouple<T>(BurcatDirectionalHead head, T objectBDP, CancellationToken? token = null) where T : IBurcatObject => SendDecoupleAsync(head, objectBDP, token).GetAwaiter().GetResult();
 
-        /// <summary>
-        /// Executes an action through the configured providers.
-        /// </summary>
-        /// <param name="instance">The target instance or type-level action target.</param>
-        /// <param name="action">The protocol-visible action name.</param>
-        /// <param name="parameters">The action parameters.</param>
-        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
-        /// <param name="token">The optional cancellation token.</param>
-        /// <returns>The action result.</returns>
-        public static async Task<ActionResult> RelayActionAsync(BurcatBoradcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null)
+        private static async Task<ActionResult> RelayActionAsync(BurcatHead? otherHead, BurcatBroadcastHead externalHead, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null)
         {
             if (action.Length != 0 && !char.IsLetterOrDigit(action[0])) throw new ArgumentException("An action must start with a letter or number", nameof(action));
             else
             {
                 CancellationToken cancellation = token ?? new CancellationTokenSource(DefaultTimeOut).Token;
 
-                ActionResult result = ignoreInternal ? ActionResult.Unsuccessful : InternalProvider.ExecuteAction(head, instance.Type, instance.Value, action, parameters);
+                ActionResult result = ignoreInternal ? ActionResult.Unsuccessful : InternalProvider.ExecuteAction(otherHead ?? externalHead, instance.Type, instance.Value, action, parameters);
                 cancellation.ThrowIfCancellationRequested();
 
-                if (!result.SuccessfulExecution && ExternalProvider is not null) result = await ExternalProvider.ExecuteAction(head, instance.Type, instance.Value, action, parameters, cancellation);
+                if (!result.SuccessfulExecution && ExternalProvider is not null) result = await ExternalProvider.ExecuteAction(externalHead, instance.Type, instance.Value, action, parameters, cancellation);
                 cancellation.ThrowIfCancellationRequested();
 
                 return result;
@@ -866,6 +865,17 @@ namespace BurcatProtocol
         }
 
         /// <summary>
+        /// Executes an action through the configured providers.
+        /// </summary>
+        /// <param name="instance">The target instance or type-level action target.</param>
+        /// <param name="action">The protocol-visible action name.</param>
+        /// <param name="parameters">The action parameters.</param>
+        /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
+        /// <param name="token">The optional cancellation token.</param>
+        /// <returns>The action result.</returns>
+        public static Task<ActionResult> RelayActionAsync(BurcatBroadcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(null, head, instance, action, parameters, ignoreInternal, token);
+
+        /// <summary>
         /// Executes an instance action through the configured providers.
         /// </summary>
         /// <typeparam name="T">The target object type.</typeparam>
@@ -875,7 +885,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync<T>(BurcatBoradcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, new(objectBDP), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(BurcatBroadcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, new(objectBDP), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes a type-level action through the configured providers.
@@ -886,7 +896,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static Task<ActionResult> RelayActionAsync<T>(BurcatBoradcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
+        public static Task<ActionResult> RelayActionAsync<T>(BurcatBroadcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayActionAsync(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes an action through the configured providers.
@@ -897,7 +907,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction(BurcatBoradcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(head, instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
+        public static ActionResult RelayAction(BurcatBroadcastHead head, BurcatInstance instance, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) => RelayActionAsync(head, instance, action, parameters, ignoreInternal, token).GetAwaiter().GetResult();
 
         /// <summary>
         /// Executes an instance action through the configured providers.
@@ -909,7 +919,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction<T>(BurcatBoradcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, new(objectBDP), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(BurcatBroadcastHead head, T objectBDP, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, new(objectBDP), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Executes a type-level action through the configured providers.
@@ -920,7 +930,7 @@ namespace BurcatProtocol
         /// <param name="ignoreInternal">Whether to skip the internal provider and query only the external provider.</param>
         /// <param name="token">The optional cancellation token.</param>
         /// <returns>The action result.</returns>
-        public static ActionResult RelayAction<T>(BurcatBoradcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
+        public static ActionResult RelayAction<T>(BurcatBroadcastHead head, string action, object?[]? parameters = null, bool ignoreInternal = false, CancellationToken? token = null) where T : IBurcatObject => RelayAction(head, BurcatInstance.Build<T>(), action, parameters, ignoreInternal, token);
 
         /// <summary>
         /// Sends an action request to another application through a stream.
@@ -1137,7 +1147,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    Guid revision = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? await RelayRevisionRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation) : Guid.Empty;
+                    Guid revision = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? await RelayRevisionRequestAsync(otherHead, new(otherHead.Headers), classID, objectID, false, cancellation) : Guid.Empty;
                     cancellation.ThrowIfCancellationRequested();
 
                     await head.Stream.WriteAsync(GetClassIdentity<RevisionScheme>().ToByteArray(), cancellation);
@@ -1179,7 +1189,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<VersionScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<VersionScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatInstance instance = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(new(otherHead.Headers), classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingInstance>();
+                    BurcatInstance instance = AcceptedIdentities.TryGetType(classID, out Type? objectType) ? new(objectType, await RelayObjectRequestAsync(otherHead, new(otherHead.Headers), classID, objectID, false, cancellation)) : BurcatInstance.Build<NothingInstance>();
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(head.Stream, instance, cancellation);
@@ -1208,7 +1218,7 @@ namespace BurcatProtocol
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? coupleException = await RelayCoupleAsync(new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
+                    BurcatException? coupleException = await RelayCoupleAsync(otherHead, new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(head.Stream, coupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
@@ -1236,7 +1246,7 @@ namespace BurcatProtocol
                     IBurcatObject reference = instance.Value ?? throw new NullReferenceException("Cannot construct an empty object.");
                     cancellation.ThrowIfCancellationRequested();
 
-                    BurcatException? decoupleException = await RelayDecoupleAsync(new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
+                    BurcatException? decoupleException = await RelayDecoupleAsync(otherHead, new(otherHead.Headers), BurcatInstance.Build(reference), false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(head.Stream, decoupleException is BurcatException exception ? new(exception) : BurcatInstance.Build<BurcatException>(), cancellation);
@@ -1288,7 +1298,7 @@ namespace BurcatProtocol
                     if (!await RecieveScheme<ParameterScheme>(head.Stream, cancellation)) throw new InvalidDataException($"Expected scheme with identifier {GetClassIdentity<ParameterScheme>()}, but data read doesn't correspond to");
                     cancellation.ThrowIfCancellationRequested();
 
-                    ActionResult result = await RelayActionAsync(new(otherHead.Headers), instance, Encoding.Unicode.GetString(data), parameters, false, cancellation);
+                    ActionResult result = await RelayActionAsync(otherHead, new(otherHead.Headers), instance, Encoding.Unicode.GetString(data), parameters, false, cancellation);
                     cancellation.ThrowIfCancellationRequested();
 
                     await SendObject(head.Stream, result, cancellation);

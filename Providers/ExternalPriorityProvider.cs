@@ -108,7 +108,7 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<Guid> GetRevision(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token)
+        public async Task<Guid> GetRevision(BurcatBroadcastHead head, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
@@ -125,7 +125,7 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<IBurcatObject?> GetObject(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token)
+        public async Task<IBurcatObject?> GetObject(BurcatBroadcastHead head, Type objectType, Guid objectID, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
@@ -142,7 +142,7 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> CoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token)
+        public async Task<BurcatException?> CoupleCache(BurcatBroadcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token)
         {
             foreach(IExternalProvider provider in Providers)
             {
@@ -156,7 +156,7 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<BurcatException?> DecoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, CancellationToken token)
+        public async Task<BurcatException?> DecoupleCache(BurcatBroadcastHead head, IBurcatObject objectBDP, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {
@@ -170,7 +170,7 @@ namespace BurcatProtocol.Providers
         }
 
         /// <inheritdoc/>
-        public async Task<ActionResult> ExecuteAction(BurcatBoradcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
+        public async Task<ActionResult> ExecuteAction(BurcatBroadcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token)
         {
             foreach (IExternalProvider provider in Providers)
             {

@@ -27,7 +27,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The provider reference of the requested object.</param>
         /// <param name="token">The cancellation token.</param>
         /// <returns>The current revision, or <see cref="Guid.Empty"/> when no revision is available.</returns>
-        Task<Guid> GetRevision(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token);
+        Task<Guid> GetRevision(BurcatBroadcastHead head, Type objectType, Guid objectID, CancellationToken token);
 
         /// <summary>
         /// Gets an external object reference.
@@ -37,7 +37,7 @@ namespace BurcatProtocol
         /// <param name="objectID">The provider reference of the requested object.</param>
         /// <param name="token">The cancellation token.</param>
         /// <returns>The referenced object, or <see langword="null"/> when it is unavailable.</returns>
-        Task<IBurcatObject?> GetObject(BurcatBoradcastHead head, Type objectType, Guid objectID, CancellationToken token);
+        Task<IBurcatObject?> GetObject(BurcatBroadcastHead head, Type objectType, Guid objectID, CancellationToken token);
 
         /// <summary>
         /// Requests that an external provider add or update an object in cache or storage.
@@ -47,7 +47,7 @@ namespace BurcatProtocol
         /// <param name="explicitelyRequested">Whether the caller explicitly requested the operation.</param>
         /// <param name="token">The cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
-        Task<BurcatException?> CoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token);
+        Task<BurcatException?> CoupleCache(BurcatBroadcastHead head, IBurcatObject objectBDP, bool explicitelyRequested, CancellationToken token);
 
         /// <summary>
         /// Requests that an external provider delete an object from cache or storage.
@@ -56,7 +56,7 @@ namespace BurcatProtocol
         /// <param name="objectBDP">The object to remove.</param>
         /// <param name="token">The cancellation token.</param>
         /// <returns><see langword="null"/> on success; otherwise, the protocol exception describing the failure.</returns>
-        Task<BurcatException?> DecoupleCache(BurcatBoradcastHead head, IBurcatObject objectBDP, CancellationToken token);
+        Task<BurcatException?> DecoupleCache(BurcatBroadcastHead head, IBurcatObject objectBDP, CancellationToken token);
 
         /// <summary>
         /// Executes an action against an external object or type.
@@ -68,6 +68,6 @@ namespace BurcatProtocol
         /// <param name="parameters">The action parameters.</param>
         /// <param name="token">The cancellation token.</param>
         /// <returns>The action result.</returns>
-        Task<ActionResult> ExecuteAction(BurcatBoradcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token);
+        Task<ActionResult> ExecuteAction(BurcatBroadcastHead head, Type objectType, IBurcatObject? objectBDP, string action, object?[]? parameters, CancellationToken token);
     }
 }
