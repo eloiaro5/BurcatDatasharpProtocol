@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 using System.Linq.Expressions;
 using System.Text;
 
@@ -345,6 +346,7 @@ namespace BurcatProtocol
             Add(new("00000000-0000-0000-0000-F00000000017"), v => BitConverter.GetBytes(DateOnly.FromDateTime(DateTime.Today).ToDateTime(v).ToBinary()), t => TimeOnly.FromDateTime(DateTime.FromBinary(BitConverter.ToInt64(t))));
             Add(new("00000000-0000-0000-0000-F00000000018"), v => BitConverter.GetBytes(v.Ticks), t => new TimeSpan(BitConverter.ToInt64(t)));
             Add(new("00000000-0000-0000-0000-F00000000019"), v => v.ToByteArray(), t => new Guid(t));
+            Add(new("00000000-0000-0000-0000-F00000000020"), v => BitConverter.GetBytes(v.ToArgb()), t => Color.FromArgb(BitConverter.ToInt32(t)));
 
             Add(new("00000000-0000-0000-0000-F10000000000"), v => [.. v.SelectMany(BitConverter.GetBytes)], t => SpanTranslation(t, 1, t => BitConverter.ToBoolean(t)));
             Add(new("00000000-0000-0000-0000-F10000000001"), v => v, t => t);
@@ -365,6 +367,7 @@ namespace BurcatProtocol
             Add(new("00000000-0000-0000-0000-F10000000017"), v => [.. v.SelectMany(x => BitConverter.GetBytes(x.Ticks))], t => SpanTranslation(t, 8, b => new TimeOnly(BitConverter.ToInt64(b, 0))));
             Add(new("00000000-0000-0000-0000-F10000000018"), v => [.. v.SelectMany(x => BitConverter.GetBytes(x.Ticks))], t => SpanTranslation(t, 8, b => new TimeSpan(BitConverter.ToInt64(b, 0))));
             Add(new("00000000-0000-0000-0000-F10000000019"), v => [.. v.SelectMany(x => x.ToByteArray())], t => SpanTranslation(t, 16, b => new Guid(b)));
+            Add(new("00000000-0000-0000-0000-F00000000020"), v => [.. v.SelectMany(x => BitConverter.GetBytes(x.ToArgb()))], t => SpanTranslation(t, 4, t => Color.FromArgb(BitConverter.ToInt32(t))));
         }
 
         /// <summary>
