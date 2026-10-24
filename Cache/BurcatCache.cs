@@ -283,7 +283,7 @@ namespace BurcatProtocol.Cache
 
                 foreach (ObjectMethod constructor in constructors.Keys)
                 {
-                    ActionResult result = constructor.TryInvoke(null, parameters, false, out IEnumerable<string> _);
+                    ActionResult result = constructor.TryInvoke(null, parameters, out IEnumerable<string> _);
                     if (result.SuccessfulExecution) { AfterConstructing?.Invoke(null, new(objectType, parameters, (ConstructorInfo)constructor.Method, result.Value)); return result.Value; }
                 }
 
@@ -302,6 +302,7 @@ namespace BurcatProtocol.Cache
         /// <summary>
         /// Executes a cached method or action on a Burcat object type.
         /// </summary>
+        /// <remarks>Validation attributes declared on the method validate its target object before invocation.</remarks>
         /// <param name="objectType">The type that owns or exposes the action.</param>
         /// <param name="objectBDP">The target object, or <see langword="null"/> for static actions.</param>
         /// <param name="name">The action name.</param>
@@ -338,7 +339,8 @@ namespace BurcatProtocol.Cache
                 {
                     LinkedList<ValidationResult> validations = [];
                     ActionResult result = method.TryDirectInvoke(objectBDP, parameters);
-                    if (result.SuccessfulExecution)
+                    if (result.Exception is not null) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, result);
+                    else if (result.SuccessfulExecution)
                         if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, result);
                        else return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."))));
                 }
@@ -346,8 +348,9 @@ namespace BurcatProtocol.Cache
                 foreach (ObjectMethod method in methods.Keys)
                 {
                     LinkedList<ValidationResult> validations = [];
-                    ActionResult result = method.TryInvoke(objectBDP, parameters, true, out IEnumerable<string> failedValidations);
-                    if (result.SuccessfulExecution)
+                    ActionResult result = method.TryInvoke(objectBDP, parameters, out IEnumerable<string> failedValidations);
+                    if (result.Exception is not null) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, result);
+                    else if (result.SuccessfulExecution)
                         if (Validator.TryValidateValue(result.Value, new ValidationContext(result.Value ?? NothingInstance.Instance), validations, method.ObjectValidations)) return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, result);
                         else return RaiseAfterExecutingAction(objectType, objectBDP, name, eventParameters, (MethodInfo)method.Method, ActionResult.Thrown(new($"Validation failed at method with name {name} in {objectType.Name}.", innerException: new BurcatException(validations.First!.Value.ErrorMessage ?? "No validation error message provided."))));
                     else foreach (string validation in failedValidations) failedMessages.Add(validation);
@@ -610,6 +613,7 @@ namespace BurcatProtocol.Cache
 
             private SortedDictionary<int, List<ValidationAttribute>> ParameterValidations { get; set; } = [];
             public IEnumerable<ValidationAttribute> ObjectValidations { get; private set; }
+            private ValidationAttribute[] ActionValidations { get; set; } = [];
 
             public ObjectMethod(ConstructorInfo info)
             {
@@ -652,6 +656,7 @@ namespace BurcatProtocol.Cache
                 else InstanceDelegate = CreateInstanceMethod(info);
 
                 ObjectValidations = [];//[.. DeclaringType.GetCustomAttributes<ValidationAttribute>()];
+                ActionValidations = [.. info.GetCustomAttributes<ValidationAttribute>()];
             }
 
             public override bool Equals(object? objectBDP)
@@ -710,16 +715,29 @@ namespace BurcatProtocol.Cache
                             if (!Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingInstance.Instance), null, kvp.Value))
                                 return ActionResult.Unsuccessful;
 
-                        object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
-                        if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
-                        else return new();
+                        if (ValidateActionTarget(target) is BurcatValidationException exception) return ActionResult.Thrown(exception);
+                        else
+                        {
+                            object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
+                            if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
+                            else return new();
+                        }
                     }
                     else return ActionResult.Unsuccessful;
                 }
                 else return ActionResult.Unsuccessful;
             }
 
-            public ActionResult TryInvoke(IBurcatObject? target, IBurcatObject?[] parameters, bool validate, out IEnumerable<string> validations)
+            private BurcatValidationException? ValidateActionTarget(IBurcatObject? target)
+            {
+                if (ActionValidations.Length == 0) return null;
+
+                List<ValidationResult> validations = [];
+                return Validator.TryValidateValue(target, new ValidationContext(target ?? NothingInstance.Instance), validations, ActionValidations)
+                    ? null : new BurcatValidationException($"Validation failed before action {Method.Name} in {DeclaringType.Name}.", innerException: new BurcatException(validations[0].ErrorMessage ?? "No validation error message provided."));
+            }
+
+            public ActionResult TryInvoke(IBurcatObject? target, IBurcatObject?[] parameters, out IEnumerable<string> validations)
             {
                 validations = [];
                 if (Parameters.Count == parameters.Length)
@@ -736,12 +754,16 @@ namespace BurcatProtocol.Cache
                     if (invokable)
                     {
                         foreach (KeyValuePair<int, List<ValidationAttribute>> kvp in ParameterValidations)
-                            if (validate && !Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingInstance.Instance), failedValidations, kvp.Value))
+                            if (!Validator.TryValidateValue(values[kvp.Key], new ValidationContext(values[kvp.Key] ?? NothingInstance.Instance), failedValidations, kvp.Value))
                             { validations = failedValidations.Where(v => v.ErrorMessage is not null).Select(v => v.ErrorMessage!); return ActionResult.Unsuccessful; }
 
-                        object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
-                        if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
-                        else return new();
+                        if (ValidateActionTarget(target) is BurcatValidationException exception) return ActionResult.Thrown(exception);
+                        else
+                        {
+                            object? result = target is null ? StaticDelegate!(values) : InstanceDelegate!(target, values);
+                            if (result is object obj) return new(BurcatTranslator.ObjectTranslate(obj));
+                            else return new();
+                        }
                     }
                     else return ActionResult.Unsuccessful;
                 }

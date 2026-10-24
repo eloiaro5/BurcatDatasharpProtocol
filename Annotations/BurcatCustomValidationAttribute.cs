@@ -13,6 +13,7 @@ namespace BurcatProtocol.Annotations
     /// <summary>
     /// Validation attribute that delegates validation to a public static method.
     /// </summary>
+    /// <remarks>When declared on an action method, validates its target object before protocol invocation. Direct CLR calls do not execute attribute validation.</remarks>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Method | AttributeTargets.Parameter, AllowMultiple = true)]
     public sealed class BurcatCustomValidationAttribute : ValidationAttribute
     {
